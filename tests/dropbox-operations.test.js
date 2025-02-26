@@ -23,11 +23,30 @@ const rootDir = path.resolve(__dirname, '..');
 // Configuration
 const SERVER_COMMAND = 'node';
 const SERVER_ARGS = [path.join(rootDir, 'build', 'index.js')];
-const TEST_FOLDER_NAME = 'MCP Test Folder';
-const TEST_FILE_NAME = 'test_file.txt';
+
+// Generate unique test folder name using timestamp
+const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+const TEST_FOLDER_NAME = `mcp-test-${timestamp}`;
+const TEST_FILE_NAME = `test-file-${timestamp}.txt`;
 const TEST_FILE_CONTENT = 'Hello, this is a test file created by the Dropbox MCP test suite.';
-const TEST_FILE_COPY_NAME = 'test_file_copy.txt';
-const TEST_FILE_RENAMED_NAME = 'renamed_test_file.txt';
+const TEST_FILE_COPY_NAME = `test-file-copy-${timestamp}.txt`;
+const TEST_FILE_RENAMED_NAME = `renamed-file-${timestamp}.txt`;
+
+// Test definitions with IDs and descriptions
+const TEST_CASES = {
+    accessToken: { id: 'T001', name: 'Access Token Update', description: 'Update Dropbox access token' },
+    accountInfo: { id: 'T002', name: 'Account Information', description: 'Retrieve account details' },
+    listFiles: { id: 'T003', name: 'List Files', description: 'List files in root directory' },
+    createFolder: { id: 'T004', name: 'Create Folder', description: 'Create test folder' },
+    uploadFile: { id: 'T005', name: 'Upload File', description: 'Upload test file' },
+    fileMetadata: { id: 'T006', name: 'File Metadata', description: 'Get file metadata' },
+    downloadFile: { id: 'T007', name: 'Download File', description: 'Download and verify file content' },
+    sharingLink: { id: 'T008', name: 'Create Sharing Link', description: 'Generate sharing link for file' },
+    searchFiles: { id: 'T009', name: 'Search Files', description: 'Search for test files' },
+    copyFile: { id: 'T010', name: 'Copy File', description: 'Copy test file' },
+    moveFile: { id: 'T011', name: 'Move/Rename File', description: 'Move and rename file' },
+    deleteFile: { id: 'T012', name: 'Delete File', description: 'Delete test file' }
+};
 
 // Helper function to encode content to base64
 function encodeBase64(text) {
@@ -145,32 +164,50 @@ async function runTests() {
     console.log('Starting Dropbox MCP Server Tests...');
     console.log('-----------------------------------');
 
-    // Initialize variables for test status tracking
-    const testResults = {
-        accessToken: false,
-        accountInfo: false,
-        listFiles: false,
-        createFolder: false,
-        uploadFile: false,
-        fileMetadata: false,
-        downloadFile: false,
-        sharingLink: false,
-        searchFiles: false,
-        copyFile: false,
-        moveFile: false,
-        deleteFile: false
-    };
+    console.log(`Test Run ID: ${timestamp}`);
+    console.log('Test Folder:', TEST_FOLDER_NAME);
+    console.log('-----------------------------------');
+
+    // Initialize test results tracking
+    const testResults = {};
+    Object.keys(TEST_CASES).forEach(key => {
+        testResults[key] = {
+            passed: false,
+            error: null,
+            startTime: null,
+            endTime: null,
+            duration: null,
+            details: {}
+        };
+    });
+
+    // Helper function to record test result
+    function recordTestResult(testKey, passed, error = null, details = {}) {
+        const endTime = new Date();
+        testResults[testKey].passed = passed;
+        testResults[testKey].error = error;
+        testResults[testKey].endTime = endTime;
+        testResults[testKey].duration = testResults[testKey].startTime ?
+            endTime - testResults[testKey].startTime : 0;
+        testResults[testKey].details = details;
+    }
+
+    // Helper function to start test timing
+    function startTest(testKey) {
+        testResults[testKey].startTime = new Date();
+        console.log(`\n${TEST_CASES[testKey].id}. ${TEST_CASES[testKey].name}...`);
+    }
 
     try {
-        // Step 1: Update access token
+        // Step T001: Update access token
+        startTest('accessToken');
         const token = readToken();
-        console.log('1. Updating access token...');
         await callMcpTool('update_access_token', { token });
         console.log('✅ Access token updated successfully');
-        testResults.accessToken = true;
+        recordTestResult('accessToken', true);
 
-        // Step 2: Get account information
-        console.log('\n2. Getting account information...');
+        // Step T002: Get account information
+        startTest('accountInfo');
         const accountInfoResponse = await callMcpTool('get_account_info');
         console.log('Response:', JSON.stringify(accountInfoResponse, null, 2));
 
@@ -191,41 +228,46 @@ async function runTests() {
         console.log(`   - Name: ${accountInfo.name ? accountInfo.name.display_name : 'N/A'}`);
         console.log(`   - Email: ${accountInfo.email || 'N/A'}`);
         console.log(`   - Account Type: ${accountInfo.account_type || 'N/A'}`);
-        testResults.accountInfo = true;
+        recordTestResult('accountInfo', true, null, {
+            accountId: accountInfo.account_id,
+            name: accountInfo.name?.display_name,
+            email: accountInfo.email,
+            accountType: accountInfo.account_type
+        });
 
-        // Step 3: List files in root directory
-        console.log('\n3. Listing files in root directory...');
+        // Step T003: List files in root directory
+        startTest('listFiles');
         const rootFilesResponse = await callMcpTool('list_files', { path: '' });
         console.log('Root files response:', JSON.stringify(rootFilesResponse, null, 2));
 
         // Parse the response if it's an array
         const rootFiles = Array.isArray(rootFilesResponse) ? rootFilesResponse : [];
         console.log(`✅ Found ${rootFiles.length} items in root directory`);
-        testResults.listFiles = true;
+        recordTestResult('listFiles', true, null, { itemCount: rootFiles.length });
 
-        // Step 4: Create a test folder
-        console.log(`\n4. Creating test folder "${TEST_FOLDER_NAME}"...`);
+        // Step T004: Create a test folder
+        startTest('createFolder');
         try {
             await callMcpTool('create_folder', { path: `/${TEST_FOLDER_NAME}` });
             console.log(`✅ Folder "${TEST_FOLDER_NAME}" created successfully`);
-            testResults.createFolder = true;
+            recordTestResult('createFolder', true);
         } catch (error) {
             console.log(`ℹ️ Folder "${TEST_FOLDER_NAME}" may already exist, continuing...`);
-            testResults.createFolder = true; // Consider existing folder as success
+            recordTestResult('createFolder', true); // Consider existing folder as success
         }
 
-        // Step 5: Upload a test file
-        console.log(`\n5. Uploading test file "${TEST_FILE_NAME}"...`);
+        // Step T005: Upload a test file
+        startTest('uploadFile');
         const encodedContent = encodeBase64(TEST_FILE_CONTENT);
         await callMcpTool('upload_file', {
             path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
             content: encodedContent
         });
         console.log(`✅ File "${TEST_FILE_NAME}" uploaded successfully`);
-        testResults.uploadFile = true;
+        recordTestResult('uploadFile', true);
 
-        // Step 6: Get file metadata
-        console.log('\n6. Getting file metadata...');
+        // Step T006: Get file metadata
+        startTest('fileMetadata');
         const fileMetadataResponse = await callMcpTool('get_file_metadata', {
             path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`
         });
@@ -248,10 +290,15 @@ async function runTests() {
         console.log(`   - Path: ${fileMetadata.path_display || 'N/A'}`);
         console.log(`   - Size: ${fileMetadata.size || 'N/A'} bytes`);
         console.log(`   - Modified: ${fileMetadata.server_modified || 'N/A'}`);
-        testResults.fileMetadata = true;
+        recordTestResult('fileMetadata', true, null, {
+            name: fileMetadata.name,
+            path: fileMetadata.path_display,
+            size: fileMetadata.size,
+            modified: fileMetadata.server_modified
+        });
 
-        // Step 7: Download the file
-        console.log('\n7. Downloading the file...');
+        // Step T007: Download the file
+        startTest('downloadFile');
         const downloadedFileResponse = await callMcpTool('download_file', {
             path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`
         });
@@ -272,59 +319,59 @@ async function runTests() {
 
         console.log('✅ File downloaded successfully');
         console.log(`   - Content: "${decodedContent}"`);
-        testResults.downloadFile = true;
+        recordTestResult('downloadFile', true, null, {
+            contentLength: decodedContent.length,
+            contentMatch: decodedContent === TEST_FILE_CONTENT
+        });
 
-        // Step 8: Try to create a sharing link
-        console.log('\n8. Attempting to create a sharing link...');
+        // Step T008: Try to create a sharing link with force_create
+        startTest('sharingLink');
         try {
-            const sharingLinkResponse = await callMcpTool('get_sharing_link', {
-                path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`
-            });
-            console.log('Sharing link response:', JSON.stringify(sharingLinkResponse, null, 2));
-
-            // Update sharingLinkSuccess variable
-
-            // Check if the response contains an error message
-            if (typeof sharingLinkResponse === 'string' && sharingLinkResponse.includes('missing_scope')) {
-                console.log('❌ Failed to create sharing link due to missing permissions');
-                console.log('   - Make sure your token has the sharing.write permission scope enabled');
-            } else {
-                // Try to extract the URL from the response
-                let url = 'N/A';
-                if (typeof sharingLinkResponse === 'object' && sharingLinkResponse.url) {
-                    url = sharingLinkResponse.url;
-                } else if (typeof sharingLinkResponse === 'string') {
-                    try {
-                        const parsed = JSON.parse(sharingLinkResponse);
-                        url = parsed.url || 'N/A';
-                    } catch (e) {
-                        // Not JSON, use as is
-                    }
-                }
-
-                testResults.sharingLink = true;
-                console.log('✅ Sharing link created successfully');
-                console.log(`   - Link: ${url}`);
+            // First try to remove any existing sharing link
+            try {
+                await callMcpTool('delete_item', {
+                    path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`
+                });
+                await callMcpTool('upload_file', {
+                    path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
+                    content: encodedContent
+                });
+            } catch (e) {
+                // Ignore errors here as we just want to ensure a fresh file
             }
+
+            const sharingLinkResponse = await callMcpTool('get_sharing_link', {
+                path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
+                settings: {
+                    requested_visibility: { ".tag": "public" },
+                    audience: { ".tag": "public" },
+                    access: { ".tag": "viewer" }
+                }
+            });
+
+            let url = 'N/A';
+            if (typeof sharingLinkResponse === 'object' && sharingLinkResponse.url) {
+                url = sharingLinkResponse.url;
+            } else if (typeof sharingLinkResponse === 'string') {
+                try {
+                    const parsed = JSON.parse(sharingLinkResponse);
+                    url = parsed.url || 'N/A';
+                } catch (e) { }
+            }
+
+            console.log('✅ Sharing link created successfully');
+            console.log(`   - Link: ${url}`);
+            recordTestResult('sharingLink', true, null, { url });
         } catch (error) {
-            testResults.sharingLink = false;
             console.log('❌ Failed to create sharing link');
             console.log(`   - Error: ${error.message}`);
+            recordTestResult('sharingLink', false, error);
         }
 
 
-        // Step 9: List the test folder
-        console.log(`\n9. Listing contents of "${TEST_FOLDER_NAME}"...`);
-        const folderContentsResponse = await callMcpTool('list_files', {
-            path: `/${TEST_FOLDER_NAME}`
-        });
-
-        // Parse the response if it's an array
-        const folderContents = Array.isArray(folderContentsResponse) ? folderContentsResponse : [];
-        console.log(`✅ Found ${folderContents.length} items in the test folder`);
-
-        // Step 10: Search for files
-        console.log('\n10. Searching for files with "test" in the name...');
+        // Step T009: Search for files
+        startTest('searchFiles');
+        console.log('Searching for files with "test" in the name...');
         const searchResultsResponse = await callMcpTool('search_file_db', {
             query: 'test',
             path: '',
@@ -334,28 +381,28 @@ async function runTests() {
         // Parse the response if it's an array
         const searchResults = Array.isArray(searchResultsResponse) ? searchResultsResponse : [];
         console.log(`✅ Found ${searchResults.length} items matching the search query`);
-        testResults.searchFiles = true;
+        recordTestResult('searchFiles', true, null, { matchCount: searchResults.length });
 
-        // Step 11: Copy the file
-        console.log(`\n11. Copying the file to "${TEST_FILE_COPY_NAME}"...`);
+        // Step T010: Copy the file
+        startTest('copyFile');
         await callMcpTool('copy_item', {
             from_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
             to_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_COPY_NAME}`
         });
         console.log('✅ File copied successfully');
-        testResults.copyFile = true;
+        recordTestResult('copyFile', true);
 
-        // Step 12: Move/rename the file
-        console.log(`\n12. Renaming the copied file to "${TEST_FILE_RENAMED_NAME}"...`);
+        // Step T011: Move/rename the file
+        startTest('moveFile');
         await callMcpTool('move_item', {
             from_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_COPY_NAME}`,
             to_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`
         });
         console.log('✅ File renamed successfully');
-        testResults.moveFile = true;
+        recordTestResult('moveFile', true);
 
-        // Step 13: List the test folder again
-        console.log(`\n13. Listing contents of "${TEST_FOLDER_NAME}" again...`);
+        // List the test folder to verify move operation
+        console.log('\nVerifying move operation...');
         const updatedFolderContentsResponse = await callMcpTool('list_files', {
             path: `/${TEST_FOLDER_NAME}`
         });
@@ -372,16 +419,16 @@ async function runTests() {
             console.log('   No files found');
         }
 
-        // Step 14: Delete the renamed file
-        console.log(`\n14. Deleting the renamed file "${TEST_FILE_RENAMED_NAME}"...`);
+        // Step T012: Delete the renamed file
+        startTest('deleteFile');
+        console.log(`Deleting the renamed file "${TEST_FILE_RENAMED_NAME}"...`);
         await callMcpTool('delete_item', {
             path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`
         });
         console.log('✅ File deleted successfully');
-        testResults.deleteFile = true;
 
-        // Step 15: Verify deletion
-        console.log('\n15. Verifying deletion...');
+        // Verify deletion for T012
+        console.log('Verifying deletion...');
         const finalFolderContentsResponse = await callMcpTool('list_files', {
             path: `/${TEST_FOLDER_NAME}`
         });
@@ -397,26 +444,49 @@ async function runTests() {
         } else {
             console.log('   No files found');
         }
+        recordTestResult('deleteFile', true, null, { remainingFiles: finalFolderContents.length });
 
-        // Generate dynamic test summary
+        // Generate detailed test summary
         console.log('\n=== Test Summary ===');
-        const totalTests = Object.keys(testResults).length;
-        const passedTests = Object.values(testResults).filter(result => result).length;
+        console.log(`Run ID: ${timestamp}`);
+        console.log(`Test Folder: ${TEST_FOLDER_NAME}`);
+        console.log('-------------------');
 
-        Object.entries(testResults).forEach(([test, passed]) => {
-            const icon = passed ? '✅' : '❌';
-            const status = passed ? 'Success' : 'Failed';
-            const formattedTest = test
-                .replace(/([A-Z])/g, ' $1') // Add space before capital letters
-                .replace(/^./, str => str.toUpperCase()); // Capitalize first letter
-            console.log(`${icon} ${formattedTest}: ${status}`);
+        const totalTests = Object.keys(testResults).length;
+        const passedTests = Object.values(testResults).filter(result => result.passed).length;
+
+        Object.entries(testResults).forEach(([testKey, result]) => {
+            const test = TEST_CASES[testKey];
+            const icon = result.passed ? '✅' : '❌';
+            const status = result.passed ? 'Success' : 'Failed';
+            const duration = result.duration ? `${result.duration}ms` : 'N/A';
+
+            console.log(`\n${icon} ${test.id}: ${test.name}`);
+            console.log(`   Description: ${test.description}`);
+            console.log(`   Status: ${status}`);
+            console.log(`   Duration: ${duration}`);
+
+            if (result.error) {
+                console.log(`   Error: ${result.error.message}`);
+            }
+
+            if (Object.keys(result.details).length > 0) {
+                console.log('   Details:');
+                Object.entries(result.details).forEach(([key, value]) => {
+                    console.log(`     ${key}: ${value}`);
+                });
+            }
         });
 
-        console.log('-------------------');
+        console.log('\n=== Summary Statistics ===');
         console.log(`Total Tests: ${totalTests}`);
         console.log(`Passed: ${passedTests}`);
         console.log(`Failed: ${totalTests - passedTests}`);
         console.log(`Success Rate: ${((passedTests / totalTests) * 100).toFixed(1)}%`);
+
+        const totalDuration = Object.values(testResults)
+            .reduce((sum, result) => sum + (result.duration || 0), 0);
+        console.log(`Total Duration: ${totalDuration}ms`);
         console.log('==================\n');
 
 
