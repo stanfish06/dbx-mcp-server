@@ -304,7 +304,7 @@ async function runTests() {
 
         // Step 10: Search for files
         console.log('\n10. Searching for files with "test" in the name...');
-        const searchResultsResponse = await callMcpTool('search_files', {
+        const searchResultsResponse = await callMcpTool('search_file_db', {
             query: 'test',
             path: '',
             max_results: 10

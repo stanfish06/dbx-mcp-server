@@ -73,7 +73,7 @@ Get metadata for a file or folder.
   - `path` (string, required): Path to the file or folder
 - **Output**: JSON object with file/folder metadata
 
-### search_files
+### search_file_db
 
 Search for files and folders in Dropbox.
 
@@ -81,7 +81,7 @@ Search for files and folders in Dropbox.
   - `query` (string, required): Search query string
   - `path` (string, optional): Path to search within (defaults to root)
   - `max_results` (number, optional): Maximum number of results to return (1-1000, default: 20)
-- **Output**: JSON array of matching files and folders
+- **Output**: JSON array of matching files and folders with metadata and highlight information
 
 ### get_sharing_link
 

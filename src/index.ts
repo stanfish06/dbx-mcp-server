@@ -201,7 +201,7 @@ class DropboxServer {
           },
         },
         {
-          name: 'search_files',
+          name: 'search_file_db',
           description: 'Search for files and folders in Dropbox',
           inputSchema: {
             type: 'object',
@@ -310,7 +310,7 @@ class DropboxServer {
           );
         case 'get_file_metadata':
           return this.getFileMetadata(String(request.params.arguments?.path));
-        case 'search_files':
+        case 'search_file_db':
           return this.searchFiles(
             String(request.params.arguments?.query),
             String(request.params.arguments?.path || ''),
