@@ -89,22 +89,50 @@ Create or retrieve a shared link for a file or folder.
 
 - **Input**:
   - `path` (string, required): Path to the file or folder to share
+  - `settings` (object, optional): Sharing settings
+    - `requested_visibility` (object): Visibility settings (e.g., `{ ".tag": "public" }`)
+    - `audience` (object): Audience settings (e.g., `{ ".tag": "public" }`)
+    - `access` (object): Access level settings (e.g., `{ ".tag": "viewer" }`)
 - **Output**: JSON object with the shared URL and sharing information
+- **Note**: If a sharing link already exists, you may need to delete and recreate the file to generate a new link
 
 ### get_account_info
 
 Get information about the connected Dropbox account.
 
 - **Input**: None
-- **Output**: JSON object with account information (name, email, etc.)
+- **Output**: JSON object with account information:
+  ```json
+  {
+    "account_id": "dbid:...",
+    "name": {
+      "given_name": "...",
+      "surname": "...",
+      "familiar_name": "...",
+      "display_name": "...",
+      "abbreviated_name": "..."
+    },
+    "email": "...",
+    "email_verified": true,
+    "country": "...",
+    "locale": "...",
+    "team": null,
+    "account_type": "..."
+  }
+  ```
 
 ### update_access_token
 
-Update the Dropbox access token at runtime.
+Update the Dropbox access token at runtime. This is particularly useful when:
+
+- The token expires and needs to be refreshed
+- You want to switch between different Dropbox accounts
+- You need to update permissions without restarting the server
 
 - **Input**:
   - `token` (string, required): New Dropbox access token
 - **Output**: Confirmation message
+- **Note**: The token must have the necessary permission scopes for the operations you plan to use
 
 ## Authentication
 
@@ -113,7 +141,30 @@ The server supports two methods of authentication:
 1. **Environment Variable**: Set `DROPBOX_ACCESS_TOKEN` in your environment
 2. **Runtime Update**: Use the `update_access_token` tool to set or update the token
 
-The server will automatically handle token validation and provide clear error messages if authentication fails.
+The server will automatically handle token validation and provide clear error messages if authentication fails. If a token expires during operation, the server will:
+
+1. Detect the authentication failure
+2. Attempt to refresh the token if possible
+3. Retry the failed operation automatically
+
+### Token Management Best Practices
+
+1. **Token Storage**:
+
+   - Store the token in a secure location
+   - Use environment variables or secure configuration management
+   - Never commit tokens to version control
+
+2. **Token Refresh**:
+
+   - Monitor token expiration
+   - Implement proper token refresh mechanisms
+   - Use the `update_access_token` tool to update tokens when needed
+
+3. **Error Handling**:
+   - Watch for authentication errors in responses
+   - Implement proper retry mechanisms with exponential backoff
+   - Log authentication failures for monitoring
 
 ## Configuration
 
