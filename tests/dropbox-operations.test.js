@@ -146,7 +146,20 @@ async function runTests() {
     console.log('-----------------------------------');
 
     // Initialize variables for test status tracking
-    let sharingLinkSuccess = false;
+    const testResults = {
+        accessToken: false,
+        accountInfo: false,
+        listFiles: false,
+        createFolder: false,
+        uploadFile: false,
+        fileMetadata: false,
+        downloadFile: false,
+        sharingLink: false,
+        searchFiles: false,
+        copyFile: false,
+        moveFile: false,
+        deleteFile: false
+    };
 
     try {
         // Step 1: Update access token
@@ -154,6 +167,7 @@ async function runTests() {
         console.log('1. Updating access token...');
         await callMcpTool('update_access_token', { token });
         console.log('✅ Access token updated successfully');
+        testResults.accessToken = true;
 
         // Step 2: Get account information
         console.log('\n2. Getting account information...');
@@ -177,6 +191,7 @@ async function runTests() {
         console.log(`   - Name: ${accountInfo.name ? accountInfo.name.display_name : 'N/A'}`);
         console.log(`   - Email: ${accountInfo.email || 'N/A'}`);
         console.log(`   - Account Type: ${accountInfo.account_type || 'N/A'}`);
+        testResults.accountInfo = true;
 
         // Step 3: List files in root directory
         console.log('\n3. Listing files in root directory...');
@@ -186,14 +201,17 @@ async function runTests() {
         // Parse the response if it's an array
         const rootFiles = Array.isArray(rootFilesResponse) ? rootFilesResponse : [];
         console.log(`✅ Found ${rootFiles.length} items in root directory`);
+        testResults.listFiles = true;
 
         // Step 4: Create a test folder
         console.log(`\n4. Creating test folder "${TEST_FOLDER_NAME}"...`);
         try {
             await callMcpTool('create_folder', { path: `/${TEST_FOLDER_NAME}` });
             console.log(`✅ Folder "${TEST_FOLDER_NAME}" created successfully`);
+            testResults.createFolder = true;
         } catch (error) {
             console.log(`ℹ️ Folder "${TEST_FOLDER_NAME}" may already exist, continuing...`);
+            testResults.createFolder = true; // Consider existing folder as success
         }
 
         // Step 5: Upload a test file
@@ -204,6 +222,7 @@ async function runTests() {
             content: encodedContent
         });
         console.log(`✅ File "${TEST_FILE_NAME}" uploaded successfully`);
+        testResults.uploadFile = true;
 
         // Step 6: Get file metadata
         console.log('\n6. Getting file metadata...');
@@ -229,6 +248,7 @@ async function runTests() {
         console.log(`   - Path: ${fileMetadata.path_display || 'N/A'}`);
         console.log(`   - Size: ${fileMetadata.size || 'N/A'} bytes`);
         console.log(`   - Modified: ${fileMetadata.server_modified || 'N/A'}`);
+        testResults.fileMetadata = true;
 
         // Step 7: Download the file
         console.log('\n7. Downloading the file...');
@@ -252,6 +272,7 @@ async function runTests() {
 
         console.log('✅ File downloaded successfully');
         console.log(`   - Content: "${decodedContent}"`);
+        testResults.downloadFile = true;
 
         // Step 8: Try to create a sharing link
         console.log('\n8. Attempting to create a sharing link...');
@@ -281,12 +302,12 @@ async function runTests() {
                     }
                 }
 
-                sharingLinkSuccess = true;
+                testResults.sharingLink = true;
                 console.log('✅ Sharing link created successfully');
                 console.log(`   - Link: ${url}`);
             }
         } catch (error) {
-            sharingLinkSuccess = false;
+            testResults.sharingLink = false;
             console.log('❌ Failed to create sharing link');
             console.log(`   - Error: ${error.message}`);
         }
@@ -313,6 +334,7 @@ async function runTests() {
         // Parse the response if it's an array
         const searchResults = Array.isArray(searchResultsResponse) ? searchResultsResponse : [];
         console.log(`✅ Found ${searchResults.length} items matching the search query`);
+        testResults.searchFiles = true;
 
         // Step 11: Copy the file
         console.log(`\n11. Copying the file to "${TEST_FILE_COPY_NAME}"...`);
@@ -321,6 +343,7 @@ async function runTests() {
             to_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_COPY_NAME}`
         });
         console.log('✅ File copied successfully');
+        testResults.copyFile = true;
 
         // Step 12: Move/rename the file
         console.log(`\n12. Renaming the copied file to "${TEST_FILE_RENAMED_NAME}"...`);
@@ -329,6 +352,7 @@ async function runTests() {
             to_path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`
         });
         console.log('✅ File renamed successfully');
+        testResults.moveFile = true;
 
         // Step 13: List the test folder again
         console.log(`\n13. Listing contents of "${TEST_FOLDER_NAME}" again...`);
@@ -354,6 +378,7 @@ async function runTests() {
             path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`
         });
         console.log('✅ File deleted successfully');
+        testResults.deleteFile = true;
 
         // Step 15: Verify deletion
         console.log('\n15. Verifying deletion...');
@@ -373,6 +398,26 @@ async function runTests() {
             console.log('   No files found');
         }
 
+        // Generate dynamic test summary
+        console.log('\n=== Test Summary ===');
+        const totalTests = Object.keys(testResults).length;
+        const passedTests = Object.values(testResults).filter(result => result).length;
+
+        Object.entries(testResults).forEach(([test, passed]) => {
+            const icon = passed ? '✅' : '❌';
+            const status = passed ? 'Success' : 'Failed';
+            const formattedTest = test
+                .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+                .replace(/^./, str => str.toUpperCase()); // Capitalize first letter
+            console.log(`${icon} ${formattedTest}: ${status}`);
+        });
+
+        console.log('-------------------');
+        console.log(`Total Tests: ${totalTests}`);
+        console.log(`Passed: ${passedTests}`);
+        console.log(`Failed: ${totalTests - passedTests}`);
+        console.log(`Success Rate: ${((passedTests / totalTests) * 100).toFixed(1)}%`);
+        console.log('==================\n');
 
 
     } catch (error) {
