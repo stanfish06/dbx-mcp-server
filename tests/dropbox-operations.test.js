@@ -373,22 +373,7 @@ async function runTests() {
             console.log('   No files found');
         }
 
-        // Test summary
-        console.log('\n-----------------------------------');
-        console.log('Test Summary:');
-        console.log('✅ Get account information');
-        console.log('✅ List files in a directory');
-        console.log('✅ Create a folder');
-        console.log('✅ Upload a file');
-        console.log('✅ Get file metadata');
-        console.log('✅ Download a file');
-        console.log(sharingLinkSuccess ? '✅ Create a sharing link' : '❌ Create a sharing link (missing permissions)');
-        console.log('✅ Search for files');
-        console.log('✅ Copy a file');
-        console.log('✅ Move/rename a file');
-        console.log('✅ Delete a file');
-        console.log('-----------------------------------');
-        console.log('All tests completed successfully!');
+
 
     } catch (error) {
         console.error('Test failed:', error);

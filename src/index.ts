@@ -12,13 +12,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 
-// Define a proper interface for MCP response
-interface McpResponse {
-  content: {
-    type: string;
-    text: string;
-  }[];
-  isError?: boolean;
+// Define response type for MCP tools
+interface McpContent {
+  type: string;
+  text: string;
+}
+
+interface McpToolResponse {
+  content: McpContent[];
 }
 
 /**
@@ -249,7 +250,7 @@ class DropboxServer {
       ],
     }));
 
-      this.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<McpResponse> => {
+      this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Handle the update_access_token tool
       if (request.params.name === 'update_access_token') {
         if (typeof request.params.arguments?.token === 'string') {
@@ -329,7 +330,7 @@ class DropboxServer {
     });
   }
 
-  private async listFiles(path: string): Promise<McpResponse> {
+  private async listFiles(path: string): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/list_folder',
@@ -400,7 +401,7 @@ class DropboxServer {
   private async uploadFile(
     path: string,
     content: string
-  ): Promise<{ content: any[] }> {
+  ): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://content.dropboxapi.com/2/files/upload',
@@ -434,7 +435,7 @@ class DropboxServer {
     }
   }
 
-  private async downloadFile(path: string): Promise<{ content: any[] }> {
+  private async downloadFile(path: string): Promise<McpToolResponse> {
     try {
       const formattedPath = path.startsWith('/') ? path : '/' + path;
       const response = await axios.post(
@@ -471,7 +472,7 @@ class DropboxServer {
     }
   }
 
-  private async deleteItem(path: string): Promise<{ content: any[] }> {
+  private async deleteItem(path: string): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/delete_v2',
@@ -503,7 +504,7 @@ class DropboxServer {
     }
   }
 
-  private async createFolder(path: string): Promise<{ content: any[] }> {
+  private async createFolder(path: string): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/create_folder_v2',
@@ -530,15 +531,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -550,7 +546,7 @@ class DropboxServer {
   private async copyItem(
     fromPath: string,
     toPath: string
-  ): Promise<{ content: any[] }> {
+  ): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/copy_v2',
@@ -580,15 +576,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -600,7 +591,7 @@ class DropboxServer {
   private async moveItem(
     fromPath: string,
     toPath: string
-  ): Promise<{ content: any[] }> {
+  ): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/move_v2',
@@ -630,15 +621,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -647,7 +633,7 @@ class DropboxServer {
     }
   }
 
-  private async getFileMetadata(path: string): Promise<{ content: any[] }> {
+  private async getFileMetadata(path: string): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/get_metadata',
@@ -676,15 +662,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -697,7 +678,7 @@ class DropboxServer {
     query: string,
     path: string = '',
     maxResults: number = 20
-  ): Promise<{ content: any[] }> {
+  ): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/files/search_v2',
@@ -732,15 +713,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -749,7 +725,7 @@ class DropboxServer {
     }
   }
 
-  private async getSharingLink(path: string): Promise<{ content: any[] }> {
+  private async getSharingLink(path: string): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings',
@@ -834,26 +810,16 @@ class DropboxServer {
         
         // Check for specific error types
         if (error.response?.data?.error?.['.tag'] === 'insufficient_permissions') {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Dropbox API error: insufficient_permissions - The access token does not have the required scope 'sharing.write'`,
-              },
-            ],
-            isError: true,
-          };
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `Dropbox API error: insufficient_permissions - The access token does not have the required scope 'sharing.write'`
+            );
         }
         
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}\nFull error: ${JSON.stringify(error.response?.data, null, 2)}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}\nFull error: ${JSON.stringify(error.response?.data, null, 2)}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,
@@ -862,7 +828,7 @@ class DropboxServer {
     }
   }
 
-  private async getAccountInfo(): Promise<{ content: any[] }> {
+  private async getAccountInfo(): Promise<McpToolResponse> {
     try {
       const response = await axios.post(
         'https://api.dropboxapi.com/2/users/get_current_account',
@@ -902,15 +868,10 @@ class DropboxServer {
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
         const errorMessage = error.response?.data?.error_summary || error.response?.data?.error?.message || error.message;
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Dropbox API error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Dropbox API error: ${errorMessage}`
+          );
       }
       throw new McpError(
         ErrorCode.InternalError,

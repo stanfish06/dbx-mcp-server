@@ -4,3 +4,5 @@ build/
 .DS_Store
 *.log
 token
+tests/dropbox-operations.test.js.old
+tests/dropbox-operations.test.js.bak
