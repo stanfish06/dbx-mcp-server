@@ -25,11 +25,12 @@ Upload a file to Dropbox.
 
 ### download_file
 
-Download a file from Dropbox.
+Download a file from Dropbox to local disk and return the file path.
 
 - **Input**:
-  - `path` (string, required): Path to the file to download
-- **Output**: Base64-encoded file content
+  - `path` (string, required): Path to the file to download from Dropbox
+- **Output**: Path to the downloaded file in the system's temp directory
+- **Note**: Files are downloaded to `/tmp/dropbox-mcp-downloads/`. The caller is responsible for reading and cleaning up the downloaded file.
 
 ### delete_item
 
@@ -208,6 +209,15 @@ Add the following to your MCP settings file:
      path: "/test.txt",
      content: Buffer.from("Hello World").toString("base64"),
    });
+
+   // Example: Download and read a file
+   const result = await mcp.useTool("dropbox-mcp-server", "download_file", {
+     path: "/test.txt",
+   });
+   const filePath = result.content[0].text;
+   const fileContent = fs.readFileSync(filePath, "utf8");
+   // ... use the file content ...
+   fs.unlinkSync(filePath); // Clean up the downloaded file
    ```
 
 ## Testing
@@ -340,9 +350,57 @@ Built with:
 
 - TypeScript
 - Model Context Protocol SDK
-- Axios for HTTP requests
+- Dropbox SDK v10.34.0
 - Dropbox API v2
 
-## License
+### Code Organization
 
-MIT
+The server leverages the official Dropbox SDK for all API operations:
+
+- Type-safe API calls with built-in TypeScript support
+- Automatic request/response handling and serialization
+- Built-in retry logic and error handling
+- Simplified authentication management
+
+The codebase follows clean code principles:
+
+- Consistent use of Dropbox SDK methods
+- Standardized error handling with proper error codes
+- Clear separation of concerns between modules
+- Type-safe operations with TypeScript interfaces
+
+### Implementation Details
+
+The server uses the Dropbox SDK to handle all API operations, which provides several benefits:
+
+1. **Type Safety**:
+
+   - Full TypeScript support for all API methods
+   - Compile-time checking of API parameters
+   - Automatic type inference for API responses
+
+2. **Error Handling**:
+
+   - Standardized error responses
+   - Built-in handling of rate limits and retries
+   - Proper error categorization (auth, permissions, etc.)
+
+3. **Authentication**:
+
+   - Automatic token management
+   - Built-in token refresh handling
+   - Proper scope validation
+
+4. **Performance**:
+
+   - Optimized request handling
+   - Connection pooling
+   - Automatic request retries
+
+5. **File Handling**:
+   - Binary files saved to system temp directory
+   - Automatic cleanup handled by OS
+   - Safe concurrent downloads with unique filenames
+   - Cross-platform compatibility using os.tmpdir()
+
+## License

@@ -142,12 +142,17 @@ async function callMcpTool(toolName, args = {}, retryCount = 0) {
                     return callMcpTool(toolName, args, retryCount + 1);
                 }
 
-                try {
-                    // Try to parse the text as JSON
-                    return JSON.parse(text);
-                } catch (e) {
-                    // If it's not JSON, return the text directly
-                    return text;
+                // For download_file, we want the raw text response
+                if (toolName === 'download_file') {
+                    return { content: [{ type: 'text', text }] };
+                } else {
+                    try {
+                        // Try to parse the text as JSON
+                        return JSON.parse(text);
+                    } catch (e) {
+                        // If it's not JSON, return the text directly
+                        return text;
+                    }
                 }
             }
         }
@@ -304,25 +309,32 @@ async function runTests() {
         });
         console.log('Download response:', JSON.stringify(downloadedFileResponse, null, 2));
 
-        // Handle the downloaded file content
-        let decodedContent = 'N/A';
-        if (typeof downloadedFileResponse === 'string') {
-            try {
-                decodedContent = decodeBase64(downloadedFileResponse);
-            } catch (e) {
-                console.log('Error decoding content:', e.message);
-                decodedContent = 'Error: Could not decode content';
-            }
-        } else {
-            decodedContent = 'Response was not a string';
+        // Get the downloaded file path from response
+        const downloadedFilePath = downloadedFileResponse?.content?.[0]?.text;
+        if (!downloadedFilePath) {
+            throw new Error('No file path received in download response');
         }
 
-        console.log('✅ File downloaded successfully');
-        console.log(`   - Content: "${decodedContent}"`);
-        recordTestResult('downloadFile', true, null, {
-            contentLength: decodedContent.length,
-            contentMatch: decodedContent === TEST_FILE_CONTENT
-        });
+        try {
+            // Read the downloaded file content
+            const downloadedContent = fs.readFileSync(downloadedFilePath, 'utf-8');
+
+            console.log('✅ File downloaded successfully');
+            console.log(`   - File path: "${downloadedFilePath}"`);
+            console.log(`   - Content: "${downloadedContent}"`);
+            recordTestResult('downloadFile', true, null, {
+                filePath: downloadedFilePath,
+                contentLength: downloadedContent.length,
+                contentMatch: downloadedContent === TEST_FILE_CONTENT
+            });
+
+            // Clean up downloaded file
+            fs.unlinkSync(downloadedFilePath);
+            console.log('   - Cleaned up downloaded file');
+        } catch (error) {
+            console.error('Error handling downloaded file:', error);
+            throw error;
+        }
 
         // Step T008: Try to create a sharing link with force_create
         startTest('sharingLink');
@@ -493,6 +505,27 @@ async function runTests() {
     } catch (error) {
         console.error('Test failed:', error);
         process.exit(1);
+    } finally {
+        // Clean up downloads directory
+        const downloadsDir = path.join(rootDir, 'downloads');
+        if (fs.existsSync(downloadsDir)) {
+            try {
+                fs.rmSync(downloadsDir, { recursive: true, force: true });
+                console.log('\nCleaned up downloads directory');
+            } catch (error) {
+                console.error('Failed to clean up downloads directory:', error);
+            }
+        }
+
+        // Clean up test folder in Dropbox
+        try {
+            await callMcpTool('delete_item', {
+                path: `/${TEST_FOLDER_NAME}`
+            });
+            console.log('Cleaned up test folder in Dropbox');
+        } catch (error) {
+            console.error('Failed to clean up test folder in Dropbox:', error);
+        }
     }
 }
 

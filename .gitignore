@@ -1,8 +1,13 @@
 node_modules/
 build/
+downloads/
 .env
 .DS_Store
 *.log
 token
 tests/dropbox-operations.test.js.old
 tests/dropbox-operations.test.js.bak
+amp
+getToken
+src/dropbox-api.ts.bak
+.gitignore
