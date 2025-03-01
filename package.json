@@ -11,21 +11,24 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "build": "tsc && node -e \"const fs=require('fs');if(fs.existsSync('build/index.js'))fs.chmodSync('build/index.js', '755')\"",
     "build:skipcheck": "./build.sh",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "test": "node tests/dropbox-operations.test.js"
+    "test": "node build/tests/dropbox-operations.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",
     "axios": "^1.7.9",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^16.4.7",
     "dropbox": "^10.34.0",
     "httpx": "^3.0.1",
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
     "@types/node": "^20.11.24",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"

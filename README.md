@@ -25,12 +25,12 @@ Upload a file to Dropbox.
 
 ### download_file
 
-Download a file from Dropbox to local disk and return the file path.
+Download a file from Dropbox and return its content as base64-encoded text.
 
 - **Input**:
   - `path` (string, required): Path to the file to download from Dropbox
-- **Output**: Path to the downloaded file in the system's temp directory
-- **Note**: Files are downloaded to `/tmp/dropbox-mcp-downloads/`. The caller is responsible for reading and cleaning up the downloaded file.
+- **Output**: Base64-encoded file content in the MCP response format
+- **Note**: The content is returned directly in the response, no local file storage is needed
 
 ### delete_item
 
@@ -97,28 +97,43 @@ Create or retrieve a shared link for a file or folder.
 - **Output**: JSON object with the shared URL and sharing information
 - **Note**: If a sharing link already exists, you may need to delete and recreate the file to generate a new link
 
+### get_file_content
+
+Get the content of a file directly from Dropbox.
+
+- **Input**:
+  - `path` (string, required): Path to the file in Dropbox
+- **Output**: Base64-encoded file content in the MCP response format
+
 ### get_account_info
 
 Get information about the connected Dropbox account.
 
 - **Input**: None
-- **Output**: JSON object with account information:
+- **Output**: JSON object with account information in the MCP response format:
   ```json
   {
-    "account_id": "dbid:...",
-    "name": {
-      "given_name": "...",
-      "surname": "...",
-      "familiar_name": "...",
-      "display_name": "...",
-      "abbreviated_name": "..."
-    },
-    "email": "...",
-    "email_verified": true,
-    "country": "...",
-    "locale": "...",
-    "team": null,
-    "account_type": "..."
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "account_id": "dbid:...",
+          "name": {
+            "given_name": "...",
+            "surname": "...",
+            "familiar_name": "...",
+            "display_name": "...",
+            "abbreviated_name": "..."
+          },
+          "email": "...",
+          "email_verified": true,
+          "country": "...",
+          "locale": "...",
+          "team": null,
+          "account_type": "..."
+        }
+      }
+    ]
   }
   ```
 
@@ -137,42 +152,129 @@ Update the Dropbox access token at runtime. This is particularly useful when:
 
 ## Authentication
 
-The server supports two methods of authentication:
+The server uses OAuth 2.0 with PKCE (Proof Key for Code Exchange) for secure authentication with Dropbox. This provides enhanced security and automatic token refresh capabilities.
 
-1. **Environment Variable**: Set `DROPBOX_ACCESS_TOKEN` in your environment
-2. **Runtime Update**: Use the `update_access_token` tool to set or update the token
+### Initial Setup
 
-The server will automatically handle token validation and provide clear error messages if authentication fails. If a token expires during operation, the server will:
+1. Set the following environment variables in your `.env` file:
 
-1. Detect the authentication failure
-2. Attempt to refresh the token if possible
-3. Retry the failed operation automatically
+   ```
+   DROPBOX_APP_KEY=your_app_key
+   DROPBOX_APP_SECRET=your_app_secret
+   DROPBOX_REDIRECT_URI=your_redirect_uri
+   ```
 
-### Token Management Best Practices
+2. Run the authorization URL generator:
 
-1. **Token Storage**:
+   ```bash
+   npm run build
+   node build/generate-auth-url.js
+   ```
 
-   - Store the token in a secure location
-   - Use environment variables or secure configuration management
-   - Never commit tokens to version control
+   This will output:
 
-2. **Token Refresh**:
+   - An authorization URL to visit
+   - A code verifier to save for the next step
 
-   - Monitor token expiration
-   - Implement proper token refresh mechanisms
-   - Use the `update_access_token` tool to update tokens when needed
+3. Visit the authorization URL in your browser and approve the application
+
+4. After approval, you'll be redirected to your redirect URI with an authorization code
+
+5. Exchange the code for tokens using:
+   ```bash
+   node build/exchange-code.js
+   ```
+   You'll need to enter:
+   - The authorization code from the redirect
+   - The code verifier from step 2
+
+### Token Management
+
+The server implements enhanced secure token management with the following features:
+
+1. **Secure Storage**:
+
+   - Tokens are securely stored in `.tokens.json` using Base64 encoding
+   - Simple yet secure encryption mechanism for token data
+   - Encryption key is managed via environment variables
+   - Access and refresh tokens are managed automatically
+   - Token expiration is tracked and handled transparently
+   - Secure token validation on server startup
+   - Efficient token data serialization and deserialization
+   - Robust error handling for encryption/decryption operations
+
+2. **Automatic Token Refresh**:
+
+   - Access tokens are automatically refreshed when expired or about to expire
+   - Configurable refresh threshold (default: 5 minutes before expiration)
+   - Intelligent retry mechanism with exponential backoff
+   - Maximum retry attempts configurable via environment
+   - Refresh tokens are used to obtain new access tokens
+   - All operations handle token expiration gracefully
 
 3. **Error Handling**:
-   - Watch for authentication errors in responses
-   - Implement proper retry mechanisms with exponential backoff
-   - Log authentication failures for monitoring
+   - Detailed error messages with specific error codes
+   - Automatic retry with fresh tokens when needed
+   - Rate limiting detection and handling
+   - Network error recovery with configurable retry attempts
+   - Invalid token detection and re-authentication prompts
+   - Proper error propagation to MCP clients
+
+### Security Best Practices
+
+1. **PKCE Implementation**:
+
+   - Uses cryptographically secure code verifiers
+   - Implements SHA-256 code challenge method
+   - Prevents authorization code interception attacks
+   - Validates all PKCE parameters
+   - Secure state parameter handling
+
+2. **Token Security**:
+
+   - Simple and secure token encryption
+   - Base64 encoding for safe data storage
+   - Secure encryption key management via environment variables
+   - Never commit `.tokens.json` or `.env` to version control
+   - Use proper file permissions for token storage
+   - Implement secure token transmission
+   - Automatic token data cleanup on errors
+   - Token validation on load
+   - Secure error handling for decryption failures
+   - Efficient memory management for token data
+
+3. **Error Management**:
+
+   - Comprehensive error type system with specific error codes
+   - Detailed error messages for troubleshooting
+   - Automatic recovery from token expiration
+   - Rate limit detection and handling
+   - Network error recovery with retries
+   - Clear guidance for re-authentication when needed
+
+4. **CORS Security**:
+   - Configurable CORS origins via environment variables
+   - Strict origin validation
+   - Default to secure settings
+   - Proper handling of preflight requests
 
 ## Configuration
 
 ### Environment Variables
 
-- `DROPBOX_ACCESS_TOKEN` (optional): A valid Dropbox access token
-  - If not provided via environment, use the `update_access_token` tool
+Required environment variables for authentication and security:
+
+- `DROPBOX_APP_KEY`: Your Dropbox app's key (from App Console)
+- `DROPBOX_APP_SECRET`: Your Dropbox app's secret (from App Console)
+- `DROPBOX_REDIRECT_URI`: OAuth redirect URI (must match App Console)
+- `TOKEN_ENCRYPTION_KEY`: 32+ character key for token encryption
+- `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
+
+Optional configuration variables:
+
+- `TOKEN_REFRESH_THRESHOLD_MINUTES`: Minutes before expiration to refresh token (default: 5)
+- `MAX_TOKEN_REFRESH_RETRIES`: Maximum number of refresh attempts (default: 3)
+- `TOKEN_REFRESH_RETRY_DELAY_MS`: Delay between refresh attempts in ms (default: 1000)
 
 ### MCP Settings Configuration
 
@@ -185,20 +287,33 @@ Add the following to your MCP settings file:
       "command": "node",
       "args": ["/path/to/dropbox-mcp-server/build/index.js"],
       "env": {
-        "DROPBOX_ACCESS_TOKEN": "your-token-here" // Optional
+        "DROPBOX_APP_KEY": "your-app-key",
+        "DROPBOX_APP_SECRET": "your-app-secret",
+        "DROPBOX_REDIRECT_URI": "your-redirect-uri"
       }
     }
   }
 }
 ```
 
+The server will handle token management automatically using the PKCE OAuth flow.
+
 ## Usage
 
-1. Install the server by adding the MCP server configuration to your settings file
-2. Provide authentication either through:
-   - Setting the `DROPBOX_ACCESS_TOKEN` environment variable, or
-   - Using the `update_access_token` tool after starting the server
-3. Start using the tools:
+1. Install the server by adding the MCP server configuration to your settings file with your Dropbox app credentials
+
+2. Complete the initial authentication:
+
+   ```bash
+   # Generate auth URL and get code verifier
+   node build/generate-auth-url.js
+
+   # Visit the URL in browser and authorize
+   # After redirect, exchange the code for tokens
+   node build/exchange-code.js
+   ```
+
+3. The server will automatically handle token refresh. Start using the tools:
 
    ```typescript
    // Example: List files in root directory
@@ -214,20 +329,39 @@ Add the following to your MCP settings file:
    const result = await mcp.useTool("dropbox-mcp-server", "download_file", {
      path: "/test.txt",
    });
-   const filePath = result.content[0].text;
-   const fileContent = fs.readFileSync(filePath, "utf8");
+   const base64Content = result.content[0].text;
+   const fileContent = Buffer.from(base64Content, "base64").toString("utf8");
    // ... use the file content ...
-   fs.unlinkSync(filePath); // Clean up the downloaded file
    ```
+
+## Response Format
+
+All tools return responses in the MCP format:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "...", // String content, may be JSON stringified for objects
+      "encoding": "base64" // Optional, used for binary data
+    }
+  ],
+  "_meta": {} // Optional metadata
+}
+```
 
 ## Testing
 
 The server includes a comprehensive test suite that verifies all Dropbox operations. The test suite:
 
-1. Tests all available tools
+1. Tests all available tools with proper response format validation
 2. Provides detailed output for each operation
 3. Handles error cases gracefully
-4. Cleans up after itself (except for the test folder)
+4. Cleans up after itself completely
+5. Verifies file content integrity with base64 encoding
+6. Tests search functionality with the correct tool name (search_file_db)
+7. Validates sharing link responses
 
 ### Running the Tests
 
@@ -258,6 +392,7 @@ The test will create a folder named "MCP Test Folder" in your Dropbox root and p
 
 The test suite covers all major operations and has been verified to pass successfully:
 
+- ✅ Token encryption and secure storage
 - ✅ Authentication and access token management
 - ✅ Account information retrieval
 - ✅ File and folder listing
@@ -265,9 +400,10 @@ The test suite covers all major operations and has been verified to pass success
 - ✅ File upload and download
 - ✅ File metadata retrieval
 - ✅ File sharing link creation (handles existing links)
-- ✅ File searching
+- ✅ File searching with advanced filters
 - ✅ File copying and moving
 - ✅ File deletion
+- ✅ Error handling and recovery
 
 All tests have been verified to pass with proper cleanup and error handling.
 
@@ -403,4 +539,81 @@ The server uses the Dropbox SDK to handle all API operations, which provides sev
    - Safe concurrent downloads with unique filenames
    - Cross-platform compatibility using os.tmpdir()
 
+## Recent Improvements
+
+1. **Enhanced Token Security**:
+
+   - Simplified token encryption using Base64 encoding
+   - Improved error handling for encryption/decryption operations
+   - More efficient token data serialization
+   - Better validation of token data structure
+
+2. **Test Suite Enhancements**:
+
+   - Added token encryption validation tests
+   - Improved error handling test coverage
+   - Better cleanup after test execution
+   - More detailed test output and logging
+
+3. **Code Quality**:
+   - Simplified encryption implementation
+   - Improved type safety
+   - Better error messages
+   - Enhanced code documentation
+
+## Future Roadmap
+
+1. **Feature Enhancements**:
+
+   - Batch operations for files
+   - Recursive folder operations
+   - File versioning support
+   - Preview generation
+   - Large file upload support
+
+2. **Security Improvements**:
+
+   - Token rotation
+   - Rate limiting
+   - Custom encryption keys
+   - Audit logging
+   - Access permissions
+
+3. **Performance Optimizations**:
+
+   - Response caching
+   - Connection pooling
+   - Request batching
+   - Parallel transfers
+   - Compression support
+
+4. **Developer Experience**:
+   - OpenAPI documentation
+   - Better TypeScript types
+   - More examples
+   - Development mode
+   - Enhanced debugging
+
 ## License
+
+MIT License
+
+Copyright (c) 2025 MCP Server Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

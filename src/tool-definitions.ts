@@ -1,18 +1,3 @@
-const updateTokenTool = {
-  name: 'update_access_token',
-  description: 'Update the Dropbox access token',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      token: {
-        type: 'string',
-        description: 'New Dropbox access token',
-      },
-    },
-    required: ['token'],
-  },
-};
-
 const toolDefinitions = [
     {
       name: 'list_files',
@@ -28,8 +13,6 @@ const toolDefinitions = [
         },
       },
     },
-    // Add the update access token tool
-    updateTokenTool,
     {
       name: 'upload_file',
       description: 'Upload a file to Dropbox',
@@ -142,7 +125,7 @@ const toolDefinitions = [
     },
     {
       name: 'search_file_db',
-      description: 'Search for files and folders in Dropbox',
+      description: 'Advanced search for files and folders in Dropbox with filtering capabilities',
       inputSchema: {
         type: 'object',
         properties: {
@@ -160,6 +143,51 @@ const toolDefinitions = [
             description: 'Maximum number of results to return (1-1000)',
             default: 20,
           },
+          file_extensions: {
+            type: 'array',
+            items: {
+              type: 'string'
+            },
+            description: 'Filter by file extensions (e.g., ["pdf", "doc", "txt"])',
+          },
+          file_categories: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['image', 'document', 'pdf', 'spreadsheet', 'presentation', 'audio', 'video', 'folder']
+            },
+            description: 'Filter by file categories',
+          },
+          date_range: {
+            type: 'object',
+            properties: {
+              start: {
+                type: 'string',
+                description: 'Start date in ISO format (e.g., "2024-01-01")',
+              },
+              end: {
+                type: 'string',
+                description: 'End date in ISO format (e.g., "2024-12-31")',
+              }
+            }
+          },
+          include_content_match: {
+            type: 'boolean',
+            description: 'Search within file contents (may be slower)',
+            default: false
+          },
+          sort_by: {
+            type: 'string',
+            enum: ['relevance', 'last_modified_time', 'file_size'],
+            description: 'Sort results by specified criteria',
+            default: 'relevance'
+          },
+          order: {
+            type: 'string',
+            enum: ['asc', 'desc'],
+            description: 'Sort order (ascending or descending)',
+            default: 'desc'
+          }
         },
         required: ['query'],
       },
@@ -184,6 +212,20 @@ const toolDefinitions = [
       inputSchema: {
         type: 'object',
         properties: {},
+      },
+    },
+    {
+      name: 'get_file_content',
+      description: 'Get the content of a file directly from Dropbox',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Path to the file in Dropbox',
+          },
+        },
+        required: ['path'],
       },
     },
   ];

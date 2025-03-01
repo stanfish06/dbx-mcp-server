@@ -3,21 +3,19 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   McpError,
-  ErrorCode,
-  z
+  ErrorCode
 } from '@modelcontextprotocol/sdk/types.js';
-
-// Define schema for prompts/list method
-const PromptsListSchema = z.object({
-  method: z.literal('prompts/list'),
-  params: z.object({}).optional()
-});
-import { accessToken, handleUpdateAccessToken } from './auth.js';
-import { handleListResources } from './resource-handler.js';
+import { getValidAccessToken } from './auth.js';
+import { handleListPrompts, handleGetPrompt } from './prompt-handler.js';
+import { handleListResources, handleReadResource } from './resource-handler.js';
 import { toolDefinitions } from './tool-definitions.js';
-import { listFiles, uploadFile, downloadFile, deleteItem, createFolder, copyItem, moveItem, getFileMetadata, searchFiles, getSharingLink, getAccountInfo } from './dropbox-api.js';
+import { listFiles, uploadFile, downloadFile, deleteItem, createFolder, copyItem, moveItem, getFileMetadata, searchFiles, getSharingLink, getAccountInfo, getFileContent } from './dropbox-api.js';
 import winston from 'winston';
 
 const logger = winston.createLogger({
@@ -37,6 +35,34 @@ if (process.env.NODE_ENV !== 'production') {
   }));
 }
 
+// Define resource templates
+const resourceTemplates = [
+  {
+    uriTemplate: 'dropbox://{path}',
+    name: 'Dropbox Item',
+    description: 'Access any file or folder in Dropbox by path',
+    parameters: {
+      path: {
+        description: 'Path to the file or folder',
+        required: true,
+        type: 'string'
+      }
+    }
+  },
+  {
+    uriTemplate: 'dropbox:///shared/{share_id}',
+    name: 'Shared Dropbox Item',
+    description: 'Access a shared Dropbox item by its share ID',
+    parameters: {
+      share_id: {
+        description: 'Shared item identifier',
+        required: true,
+        type: 'string'
+      }
+    }
+  }
+];
+
 class DropboxServer {
   private server: Server;
 
@@ -51,87 +77,127 @@ class DropboxServer {
           resources: {
             types: ["dropbox-file", "dropbox-folder"],
           },
-          tools: {},
+          tools: {
+            tools: toolDefinitions
+          },
+          prompts: {
+            listChanged: true
+          }
         },
       }
     );
 
-    this.setupToolHandlers();
+    this.setupHandlers();
+    this.setupPromptHandlers();
   }
 
-  private setupToolHandlers() {
-    this.server.setRequestHandler(ListResourcesRequestSchema, handleListResources);
+  private setupPromptHandlers() {
+    // Prompt handlers
+    this.server.setRequestHandler(ListPromptsRequestSchema, handleListPrompts);
+    this.server.setRequestHandler(GetPromptRequestSchema, handleGetPrompt);
+  }
 
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: toolDefinitions,
+  private setupHandlers() {
+    // Resource handlers
+    this.server.setRequestHandler(ListResourcesRequestSchema, handleListResources);
+    this.server.setRequestHandler(ReadResourceRequestSchema, handleReadResource);
+    this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+      resourceTemplates
     }));
 
-      this.server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-      try {
-        logger.info(`CallToolRequest: ${request.params.name}`);
-      } catch (error) {
-        console.error("Error logging tool call:", error);
-      }
-      if (request.params.name === 'update_access_token') {
-        return await handleUpdateAccessToken(request);
-      }
+    // Tool handlers
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      console.error('Available tools:', toolDefinitions.map(t => t.name));
+      return {
+        tools: toolDefinitions,
+      };
+    });
 
-      // Check if token exists for other operations
-      if (!accessToken) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text:
-                'Authentication required. Please use the update_access_token tool to set a valid Dropbox access token.',
-            },
-          ],
-        };
+    this.server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
+      console.error('Full request:', JSON.stringify(request, null, 2));
+      console.error('Method:', request.method);
+      console.error('Params:', JSON.stringify(request.params, null, 2));
+      // Verify authentication for all operations
+      try {
+        await getValidAccessToken();
+      } catch (error) {
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          'Authentication required. Please complete the OAuth setup:\n' +
+          '1. Run: node build/generate-auth-url.js\n' +
+          '2. Visit the URL and authorize the app\n' +
+          '3. Run: node build/exchange-code.js'
+        );
       }
 
       // Handle other tools
+      let result;
       switch (request.params.name) {
         case 'list_files':
-          return await listFiles(String(request.params.arguments?.path || ''));
+          result = await listFiles(String(request.params.arguments?.path || ''));
+          break;
         case 'upload_file':
-          return await uploadFile(
+          result = await uploadFile(
             String(request.params.arguments?.path),
             String(request.params.arguments?.content)
           );
+          break;
         case 'download_file':
-          return await downloadFile(String(request.params.arguments?.path));
+          result = await downloadFile(String(request.params.arguments?.path));
+          break;
         case 'delete_item':
-          return await deleteItem(String(request.params.arguments?.path));
+          result = await deleteItem(String(request.params.arguments?.path));
+          break;
         case 'create_folder':
-          return await createFolder(String(request.params.arguments?.path));
+          result = await createFolder(String(request.params.arguments?.path));
+          break;
         case 'copy_item':
-          return await copyItem(
+          result = await copyItem(
             String(request.params.arguments?.from_path),
             String(request.params.arguments?.to_path)
           );
+          break;
         case 'move_item':
-          return await moveItem(
+          result = await moveItem(
             String(request.params.arguments?.from_path),
             String(request.params.arguments?.to_path)
           );
+          break;
         case 'get_file_metadata':
-          return await getFileMetadata(String(request.params.arguments?.path));
+          result = await getFileMetadata(String(request.params.arguments?.path));
+          break;
         case 'search_file_db':
-          return await searchFiles(
-            String(request.params.arguments?.query),
-            String(request.params.arguments?.path || ''),
-            Number(request.params.arguments?.max_results || 20)
-          );
+          result = await searchFiles({
+            query: String(request.params.arguments?.query),
+            path: String(request.params.arguments?.path || ''),
+            maxResults: Number(request.params.arguments?.max_results || 20),
+            fileExtensions: request.params.arguments?.file_extensions,
+            fileCategories: request.params.arguments?.file_categories,
+            dateRange: request.params.arguments?.date_range,
+            includeContentMatch: Boolean(request.params.arguments?.include_content_match),
+            sortBy: request.params.arguments?.sort_by || 'relevance',
+            order: request.params.arguments?.order || 'desc'
+          });
+          break;
         case 'get_sharing_link':
-          return await getSharingLink(String(request.params.arguments?.path));
+          result = await getSharingLink(String(request.params.arguments?.path));
+          break;
         case 'get_account_info':
-          return await getAccountInfo();
+          result = await getAccountInfo();
+          break;
+        case 'get_file_content':
+          result = await getFileContent(String(request.params.arguments?.path));
+          break;
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
             `Unknown tool: ${request.params.name}`
           );
       }
+      return {
+        content: result.content,
+        _meta: {}
+      };
     });
   }
 

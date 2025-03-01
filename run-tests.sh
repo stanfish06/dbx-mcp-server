@@ -7,27 +7,40 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Check if token file exists
-if [ ! -f "token" ]; then
-  echo "Error: token file not found in the current directory."
-  echo "Please create a file named 'token' containing your Dropbox access token."
+# Check if .tokens.json exists
+if [ ! -f ".tokens.json" ]; then
+  echo "Error: .tokens.json file not found in the current directory."
+  echo "Please complete the authentication setup first."
   exit 1
 fi
 
-# Read the token from the file
-TOKEN=$(cat token)
+# Extract the access token from .tokens.json
+TOKEN=$(node -e "const fs=require('fs');const tokens=JSON.parse(fs.readFileSync('.tokens.json'));console.log(tokens.accessToken)")
 
 if [ -z "$TOKEN" ]; then
-  echo "Error: token file is empty."
-  echo "Please add your Dropbox access token to the token file."
+  echo "Error: Could not extract access token from .tokens.json"
   exit 1
+fi
+
+# Generate a secure encryption key if not provided
+if [ -z "$TOKEN_ENCRYPTION_KEY" ]; then
+  TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32)
 fi
 
 echo "Running Dropbox MCP Server tests with authentication..."
 echo "-----------------------------------"
 
-# Set the token as an environment variable and run the test
-DROPBOX_ACCESS_TOKEN="$TOKEN" npm test
+# Set all required environment variables and run the test
+DROPBOX_APP_KEY=jphq193qm795io8 \
+DROPBOX_APP_SECRET=ltdw34n0b4ob14u \
+DROPBOX_REDIRECT_URI=http://localhost \
+DROPBOX_ACCESS_TOKEN="$TOKEN" \
+TOKEN_ENCRYPTION_KEY="$TOKEN_ENCRYPTION_KEY" \
+CORS_ALLOWED_ORIGINS="http://localhost:3000" \
+TOKEN_REFRESH_THRESHOLD_MINUTES=5 \
+MAX_TOKEN_REFRESH_RETRIES=3 \
+TOKEN_REFRESH_RETRY_DELAY_MS=1000 \
+npm test
 
 echo "-----------------------------------"
 echo "Test execution completed."

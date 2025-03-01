@@ -1,6 +1,6 @@
 import { Dropbox } from 'dropbox';
 import { McpToolResponse } from './interfaces.js';
-import { accessToken } from './auth.js';
+import { getValidAccessToken } from './auth.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -9,6 +9,8 @@ import os from 'os';
 // Helper function to handle Dropbox API errors
 function handleDropboxError(error: any): never {
   const errorMessage = error?.error?.error_summary || error?.message || 'Unknown error';
+  
+  // Handle specific error cases
   if (error?.status === 401 || errorMessage.includes('invalid_access_token')) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -21,19 +23,43 @@ function handleDropboxError(error: any): never {
       `Dropbox API error: insufficient_permissions - The access token does not have the required scope`
     );
   }
+  if (errorMessage.includes('path/not_found')) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Path not found in Dropbox`
+    );
+  }
+  if (errorMessage.includes('path/malformed')) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Invalid path format`
+    );
+  }
+  
   throw new McpError(
     ErrorCode.InternalError,
     `Dropbox API error: ${errorMessage}`
   );
 }
 
-// Initialize Dropbox client
-const dbx = new Dropbox({ accessToken: accessToken || undefined });
+// Get a Dropbox client with a valid token
+async function getDropboxClient(): Promise<Dropbox> {
+  const token = await getValidAccessToken();
+  return new Dropbox({ accessToken: token });
+}
+
+// Helper function to format paths for Dropbox API
+function formatDropboxPath(path: string): string {
+  if (!path || path === '/') return '';
+  // Remove leading/trailing slashes and add a single leading slash
+  return '/' + path.replace(/^\/+|\/+$/g, '');
+}
 
 async function listFiles(path: string): Promise<McpToolResponse> {
   try {
-    const response = await dbx.filesListFolder({
-      path: path === "" ? "" : "/" + path.replace(/^\/+/, ""),
+    const client = await getDropboxClient();
+    const response = await client.filesListFolder({
+      path: formatDropboxPath(path),
       recursive: false,
       include_media_info: false,
       include_deleted: false,
@@ -61,8 +87,9 @@ async function uploadFile(
 ): Promise<McpToolResponse> {
   try {
     const buffer = Buffer.from(content, 'base64');
-    const response = await dbx.filesUpload({
-      path,
+    const client = await getDropboxClient();
+    const response = await client.filesUpload({
+      path: formatDropboxPath(path),
       contents: buffer,
       mode: { '.tag': 'overwrite' },
     });
@@ -94,30 +121,42 @@ async function ensureDownloadsDir() {
 
 async function downloadFile(path: string): Promise<McpToolResponse> {
   try {
-    const formattedPath = path.startsWith('/') ? path : '/' + path;
-    const response = await dbx.filesDownload({ path: formattedPath });
+    // Get metadata first to verify it's a file
+    const client = await getDropboxClient();
+    const metadata = await client.filesGetMetadata({
+      path: formatDropboxPath(path)
+    });
+    
+    if (metadata.result['.tag'] !== 'file') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Cannot download a folder'
+      );
+    }
 
-    // Based on Dropbox SDK example
+    const response = await (await getDropboxClient()).filesDownload({ 
+      path: formatDropboxPath(path)
+    });
+
     const fileData = response.result as any;
     if (!fileData) {
       throw new Error('No file data received from Dropbox');
     }
 
-    // Ensure downloads directory exists
     await ensureDownloadsDir();
 
-    // Get file name from path
     const fileName = fileData.name || path.split('/').pop() || 'downloaded_file';
     const filePath = join(DOWNLOADS_DIR, fileName);
 
-    // Write file to disk
-    await writeFile(filePath, fileData.fileBinary);
+    // Convert the binary data to base64 for text transmission
+    const base64Content = fileData.fileBinary.toString('base64');
 
     return {
       content: [
         {
           type: 'text',
-          text: filePath,
+          text: base64Content,
+          encoding: 'base64'
         },
       ],
     };
@@ -128,7 +167,9 @@ async function downloadFile(path: string): Promise<McpToolResponse> {
 
 async function deleteItem(path: string): Promise<McpToolResponse> {
   try {
-    await dbx.filesDeleteV2({ path });
+    await (await getDropboxClient()).filesDeleteV2({ 
+      path: formatDropboxPath(path)
+    });
 
     return {
       content: [
@@ -145,8 +186,8 @@ async function deleteItem(path: string): Promise<McpToolResponse> {
 
 async function createFolder(path: string): Promise<McpToolResponse> {
   try {
-    await dbx.filesCreateFolderV2({
-      path,
+    await (await getDropboxClient()).filesCreateFolderV2({
+      path: formatDropboxPath(path),
       autorename: false,
     });
 
@@ -168,9 +209,9 @@ async function copyItem(
   toPath: string
 ): Promise<McpToolResponse> {
   try {
-    await dbx.filesCopyV2({
-      from_path: fromPath,
-      to_path: toPath,
+    await (await getDropboxClient()).filesCopyV2({
+      from_path: formatDropboxPath(fromPath),
+      to_path: formatDropboxPath(toPath),
       allow_shared_folder: true,
       autorename: false,
       allow_ownership_transfer: false,
@@ -194,9 +235,9 @@ async function moveItem(
   toPath: string
 ): Promise<McpToolResponse> {
   try {
-    await dbx.filesMoveV2({
-      from_path: fromPath,
-      to_path: toPath,
+    await (await getDropboxClient()).filesMoveV2({
+      from_path: formatDropboxPath(fromPath),
+      to_path: formatDropboxPath(toPath),
       allow_shared_folder: true,
       autorename: false,
       allow_ownership_transfer: false,
@@ -217,8 +258,8 @@ async function moveItem(
 
 async function getFileMetadata(path: string): Promise<McpToolResponse> {
   try {
-    const response = await dbx.filesGetMetadata({
-      path,
+    const response = await (await getDropboxClient()).filesGetMetadata({
+      path: formatDropboxPath(path),
       include_media_info: true,
       include_deleted: false,
       include_has_explicit_shared_members: true,
@@ -233,34 +274,208 @@ async function getFileMetadata(path: string): Promise<McpToolResponse> {
       ],
     };
   } catch (error: any) {
+    // Special handling for metadata-specific errors
+    const errorMessage = error?.error?.error_summary || error?.message || 'Unknown error';
+    if (errorMessage.includes('path/not_found')) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `Resource not found: ${path}`
+      );
+    }
     handleDropboxError(error);
   }
 }
 
-async function searchFiles(
-  query: string,
-  path: string = '',
-  maxResults: number = 20
-): Promise<McpToolResponse> {
+import { files } from 'dropbox/types';
+
+interface SearchOptions {
+  query: string;
+  path?: string;
+  maxResults?: number;
+  fileExtensions?: string[];
+  fileCategories?: string[];
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+  includeContentMatch?: boolean;
+  sortBy?: 'relevance' | 'last_modified_time' | 'file_size';
+  order?: 'asc' | 'desc';
+}
+
+interface FileMetadata extends files.FileMetadata {
+  name: string;
+  path_lower: string;
+  server_modified: string;
+  size: number;
+  '.tag': 'file';
+}
+
+interface FolderMetadata extends files.FolderMetadata {
+  name: string;
+  path_lower: string;
+  '.tag': 'folder';
+}
+
+type DropboxMetadata = FileMetadata | FolderMetadata;
+
+interface SearchMatch {
+  metadata: DropboxMetadata;
+  match_type: { '.tag': string };
+  highlight_spans: Array<{ highlight: string }>;
+}
+
+function getFileCategory(metadata: any): string {
+  const extension = (metadata.name || '').split('.').pop()?.toLowerCase();
+  const mimeType = metadata.media_info?.metadata?.mime_type;
+
+  // Image files
+  if (mimeType?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) {
+    return 'image';
+  }
+  // Document files
+  if (['doc', 'docx', 'rtf', 'odt'].includes(extension)) {
+    return 'document';
+  }
+  // PDF files
+  if (extension === 'pdf' || mimeType === 'application/pdf') {
+    return 'pdf';
+  }
+  // Spreadsheet files
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(extension)) {
+    return 'spreadsheet';
+  }
+  // Presentation files
+  if (['ppt', 'pptx', 'odp'].includes(extension)) {
+    return 'presentation';
+  }
+  // Audio files
+  if (mimeType?.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a'].includes(extension)) {
+    return 'audio';
+  }
+  // Video files
+  if (mimeType?.startsWith('video/') || ['mp4', 'avi', 'mov', 'wmv'].includes(extension)) {
+    return 'video';
+  }
+  // Folders
+  if (metadata['.tag'] === 'folder') {
+    return 'folder';
+  }
+  return 'other';
+}
+
+async function searchFiles({
+  query,
+  path = '',
+  maxResults = 20,
+  fileExtensions,
+  fileCategories,
+  dateRange,
+  includeContentMatch = false,
+  sortBy = 'relevance',
+  order = 'desc'
+}: SearchOptions): Promise<McpToolResponse> {
   try {
-    const response = await dbx.filesSearchV2({
+    const client = await getDropboxClient();
+    const response = await client.filesSearchV2({
       query,
       options: {
-        path: path === '' ? '' : path,
+        path: formatDropboxPath(path),
         max_results: Math.min(Math.max(1, maxResults), 1000),
         file_status: { '.tag': 'active' },
-        filename_only: false,
+        filename_only: !includeContentMatch,
       },
       match_field_options: {
         include_highlights: true,
       },
     });
 
+    let matches = response.result.matches.map(match => {
+      // The search response has a nested metadata structure
+      const metadata = (match.metadata as any).metadata as DropboxMetadata;
+      return {
+        metadata,
+        match_type: match.match_type,
+        highlights: match.highlight_spans,
+      };
+    });
+
+    // Apply file extension filter
+    if (fileExtensions && fileExtensions.length > 0) {
+      matches = matches.filter(match => {
+        const extension = match.metadata.name.split('.').pop()?.toLowerCase();
+        return extension && fileExtensions.includes(extension);
+      });
+    }
+
+    // Apply file category filter
+    if (fileCategories && fileCategories.length > 0) {
+      matches = matches.filter(match => {
+        const category = getFileCategory(match.metadata);
+        return fileCategories.includes(category);
+      });
+    }
+
+    function isFileMetadata(metadata: DropboxMetadata): metadata is FileMetadata {
+      return metadata['.tag'] === 'file';
+    }
+
+    // Apply date range filter
+    if (dateRange) {
+      const startDate = dateRange.start ? new Date(dateRange.start).getTime() : 0;
+      const endDate = dateRange.end ? new Date(dateRange.end).getTime() : Infinity;
+
+      matches = matches.filter(match => {
+        if (!isFileMetadata(match.metadata)) return false;
+        const modifiedTime = new Date(match.metadata.server_modified).getTime();
+        return modifiedTime >= startDate && modifiedTime <= endDate;
+      });
+    }
+
+    // Apply sorting
+    if (sortBy !== 'relevance') {
+      matches.sort((a, b) => {
+        if (sortBy === 'last_modified_time') {
+          if (!isFileMetadata(a.metadata) || !isFileMetadata(b.metadata)) return 0;
+          const timeA = new Date(a.metadata.server_modified).getTime();
+          const timeB = new Date(b.metadata.server_modified).getTime();
+          return order === 'asc' ? timeA - timeB : timeB - timeA;
+        } else if (sortBy === 'file_size') {
+          const sizeA = isFileMetadata(a.metadata) ? a.metadata.size : 0;
+          const sizeB = isFileMetadata(b.metadata) ? b.metadata.size : 0;
+          return order === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+        }
+        return 0;
+      });
+    } else if (order === 'asc') {
+      // For relevance sorting, we only need to reverse if ascending order is requested
+      matches.reverse();
+    }
+
+    // Format the results with categories
+    const formattedMatches = matches.map(match => ({
+      ...match,
+      category: getFileCategory(match.metadata),
+    }));
+
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify(response.result.matches, null, 2),
+          text: JSON.stringify({
+            total_results: formattedMatches.length,
+            search_criteria: {
+              query,
+              path,
+              file_extensions: fileExtensions,
+              file_categories: fileCategories,
+              date_range: dateRange,
+              include_content_match: includeContentMatch,
+              sort_by: sortBy,
+              order: order,
+            },
+            matches: formattedMatches,
+          }, null, 2),
         },
       ],
     };
@@ -272,8 +487,8 @@ async function searchFiles(
 async function getSharingLink(path: string): Promise<McpToolResponse> {
   try {
     try {
-      const response = await dbx.sharingCreateSharedLinkWithSettings({
-        path,
+      const response = await (await getDropboxClient()).sharingCreateSharedLinkWithSettings({
+        path: formatDropboxPath(path),
         settings: {
           requested_visibility: { '.tag': 'public' },
           audience: { '.tag': 'public' },
@@ -296,8 +511,8 @@ async function getSharingLink(path: string): Promise<McpToolResponse> {
     } catch (error: any) {
       // Handle case where link already exists
       if (error?.error?.error_summary?.includes('shared_link_already_exists')) {
-        const listResponse = await dbx.sharingListSharedLinks({
-          path,
+        const listResponse = await (await getDropboxClient()).sharingListSharedLinks({
+          path: formatDropboxPath(path),
           direct_only: true,
         });
 
@@ -327,7 +542,7 @@ async function getSharingLink(path: string): Promise<McpToolResponse> {
 
 async function getAccountInfo(): Promise<McpToolResponse> {
   try {
-    const response = await dbx.usersGetCurrentAccount();
+    const response = await (await getDropboxClient()).usersGetCurrentAccount();
 
     const accountInfo = {
       account_id: response.result.account_id,
@@ -357,4 +572,57 @@ async function getAccountInfo(): Promise<McpToolResponse> {
   }
 }
 
- export { listFiles, uploadFile, downloadFile, deleteItem, createFolder, copyItem, moveItem, getFileMetadata, searchFiles, getSharingLink, getAccountInfo };
+async function getFileContent(path: string): Promise<McpToolResponse> {
+  try {
+    // Get metadata first to verify it's a file
+    const metadata = await (await getDropboxClient()).filesGetMetadata({
+      path: formatDropboxPath(path)
+    });
+    
+    if (metadata.result['.tag'] !== 'file') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Cannot get content of a folder'
+      );
+    }
+
+    const response = await (await getDropboxClient()).filesDownload({ 
+      path: formatDropboxPath(path)
+    });
+
+    const fileData = response.result as any;
+    if (!fileData) {
+      throw new Error('No file data received from Dropbox');
+    }
+
+    // Convert the binary data to base64 for text transmission
+    const base64Content = fileData.fileBinary.toString('base64');
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: base64Content,
+          encoding: 'base64'
+        },
+      ],
+    };
+  } catch (error: any) {
+    handleDropboxError(error);
+  }
+}
+
+export { 
+  listFiles, 
+  uploadFile, 
+  downloadFile, 
+  deleteItem, 
+  createFolder, 
+  copyItem, 
+  moveItem, 
+  getFileMetadata, 
+  searchFiles, 
+  getSharingLink, 
+  getAccountInfo,
+  getFileContent 
+};

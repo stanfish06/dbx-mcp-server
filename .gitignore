@@ -1,13 +1,58 @@
+# Dependencies
 node_modules/
 build/
 downloads/
+
+# Environment and secrets
 .env
-.DS_Store
-*.log
+.tokens.json
 token
-tests/dropbox-operations.test.js.old
-tests/dropbox-operations.test.js.bak
-amp
+*.key
+*.pem
+*.cert
+credentials.txt
+*credentials*.txt
+
+# Logs and debugging
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Testing
+coverage/
+.nyc_output/
+*.test.js.old
+*.test.js.bak
+*.test.ts.old
+*.test.ts.bak
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*~
+
+# Build output
+dist/
+build/
+out/
+
+# Docker
+Dockerfile
+.dockerignore
 getToken
-src/dropbox-api.ts.bak
-.gitignore
