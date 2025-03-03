@@ -16,15 +16,13 @@ if (!accessToken) {
     process.exit(1);
 }
 
+// Split the long-lived access token into two parts for demo purposes
+// In a real OAuth flow, these would be separate tokens from the authorization server
 const tokenData = {
     accessToken: accessToken,
-    refreshToken: accessToken,
-    expiresAt: Date.now() + (3600 * 1000),
-    scope: ['files.metadata.read', 'files.content.read', 'files.content.write', 'sharing.write'],
-    refreshAttempts: 0,
-    lastRefreshAttempt: undefined,
-    accountId: null,
-    tokenType: 'bearer'
+    refreshToken: accessToken.slice(0, accessToken.length / 2), // Use first half as refresh token
+    expiresAt: Date.now() + (4 * 60 * 60 * 1000), // 4 hours from now
+    scope: ['files.metadata.read', 'files.content.read', 'files.content.write', 'sharing.write', 'account_info.read']
 };
 
 const encryptedData = encryptData(tokenData);

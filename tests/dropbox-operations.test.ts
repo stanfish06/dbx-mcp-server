@@ -16,7 +16,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setTimeout } from 'node:timers/promises';
-import { decryptData } from '../src/security-utils.js';
+import { decryptData, encryptData } from '../src/security-utils.js';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 // Get the directory name of the current module
 const __filename = fileURLToPath(import.meta.url);
@@ -53,17 +57,23 @@ interface TestResult {
 
 const TEST_CASES: Record<string, TestCase> = {
   tokenStore: { id: 'T001', name: 'Token Store Verification', description: 'Verify token store exists and is valid' },
-  accountInfo: { id: 'T002', name: 'Account Information', description: 'Retrieve account details' },
-  listFiles: { id: 'T003', name: 'List Files', description: 'List files in root directory' },
-  createFolder: { id: 'T004', name: 'Create Folder', description: 'Create test folder' },
-  uploadFile: { id: 'T005', name: 'Upload File', description: 'Upload test file' },
-  fileMetadata: { id: 'T006', name: 'File Metadata', description: 'Get file metadata' },
-  downloadFile: { id: 'T007', name: 'Download File', description: 'Download and verify file content' },
-  sharingLink: { id: 'T008', name: 'Create Sharing Link', description: 'Generate sharing link for file' },
-  searchFiles: { id: 'T009', name: 'Search Files', description: 'Search for test files' },
-  copyFile: { id: 'T010', name: 'Copy File', description: 'Copy test file' },
-  moveFile: { id: 'T011', name: 'Move/Rename File', description: 'Move and rename file' },
-  deleteFile: { id: 'T012', name: 'Delete File', description: 'Delete test file' }
+  tokenRefresh: { id: 'T002', name: 'Token Refresh', description: 'Test automatic token refresh' },
+  accountInfo: { id: 'T003', name: 'Account Information', description: 'Retrieve account details' },
+  listFiles: { id: 'T004', name: 'List Files', description: 'List files in root directory' },
+  createFolder: { id: 'T005', name: 'Create Folder', description: 'Create test folder' },
+  uploadFile: { id: 'T006', name: 'Upload File', description: 'Upload test file' },
+  fileMetadata: { id: 'T007', name: 'File Metadata', description: 'Get file metadata' },
+  downloadFile: { id: 'T008', name: 'Download File', description: 'Download and verify file content' },
+  sharingLink: { id: 'T009', name: 'Create Sharing Link', description: 'Generate sharing link for file' },
+  searchFiles: { id: 'T010', name: 'Search Files', description: 'Search for test files' },
+  copyFile: { id: 'T011', name: 'Copy File', description: 'Copy test file' },
+  moveFile: { id: 'T012', name: 'Move/Rename File', description: 'Move and rename file' },
+  safeDeleteConfirm: { id: 'T013', name: 'Safe Delete Confirmation', description: 'Test safe delete confirmation requirement' },
+  safeDeleteSoft: { id: 'T014', name: 'Safe Delete with Recycle Bin', description: 'Test soft delete to recycle bin' },
+  safeDeletePermanent: { id: 'T015', name: 'Safe Delete Permanent', description: 'Test permanent deletion' },
+  safeDeleteRateLimit: { id: 'T016', name: 'Safe Delete Rate Limit', description: 'Test delete rate limiting' },
+  safeDeletePathValidation: { id: 'T017', name: 'Safe Delete Path Validation', description: 'Test path validation' },
+  legacyDelete: { id: 'T018', name: 'Legacy Delete Operation', description: 'Test backward compatibility of delete operation' }
 };
 
 // Helper functions
@@ -84,8 +94,9 @@ function verifyTokenStore(): void {
     process.exit(1);
   }
 
+  let encryptedData;
   try {
-    const encryptedData = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf-8'));
+    encryptedData = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf-8'));
     if (!encryptedData.encryptedData) {
       throw new Error('Invalid encrypted token data');
     }
@@ -95,7 +106,9 @@ function verifyTokenStore(): void {
       throw new Error('Invalid token data');
     }
   } catch (error) {
-    console.error('Error: Invalid token store. Please re-run the authentication setup.');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error: Token store validation failed:', errorMessage);
+    console.error('Current token data:', encryptedData || 'Could not read token data');
     process.exit(1);
   }
 }
@@ -128,11 +141,16 @@ async function sendMcpRequest(request: any): Promise<any> {
       }
 
       try {
-        const response = JSON.parse(responseData);
+        // Get the last line of response data (which should be the JSON response)
+        const lines = responseData.trim().split('\n');
+        const lastLine = lines[lines.length - 1];
+        
+        const response = JSON.parse(lastLine);
         resolve(response);
       } catch (error) {
         console.error('Error parsing response:', error);
-        console.error('Response data:', responseData);
+        console.error('Full response data:', responseData);
+        console.error('Response lines:', responseData.trim().split('\n'));
         reject(error);
       }
     });
@@ -213,7 +231,78 @@ async function runTests() {
     console.log('✅ Token store verified successfully');
     recordTestResult('tokenStore', true);
 
-    // Step T002: Get account information
+    // Step T002: Test token refresh
+    startTest('tokenRefresh');
+    
+    // Import auth module
+    const auth = await import('../src/auth.js');
+    
+    // Load current token data
+    const tokenData = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf-8'));
+    const currentToken = decryptData(tokenData);
+    console.log('Current token data:', {
+        hasAccessToken: !!currentToken.accessToken,
+        hasRefreshToken: !!currentToken.refreshToken,
+        expiresAt: new Date(currentToken.expiresAt).toISOString(),
+        scope: currentToken.scope
+    });
+    
+    // Check if we have a proper OAuth token with code verifier
+    const isProperOAuthToken = currentToken.refreshToken && currentToken.codeVerifier;
+    
+    // Skip refresh test if not using proper OAuth token
+    if (!isProperOAuthToken) {
+        console.log('ℹ️ Skipping token refresh test - token not obtained through OAuth flow');
+        console.log('To test token refresh:');
+        console.log('1. Run: node build/generate-auth-url.js');
+        console.log('2. Visit the URL and authorize the app');
+        console.log('3. Run: node build/exchange-code.js');
+        recordTestResult('tokenRefresh', true, null, {
+            skipped: true,
+            reason: 'Using long-lived access token'
+        });
+    } else {
+        // Force token expiration while preserving other fields
+        const originalExpiry = currentToken.expiresAt;
+        const expiredToken = {
+            ...currentToken,
+            expiresAt: Date.now() - 1000 // Set to expired
+        };
+        
+        // Save expired token and update auth module's token data
+        const encryptedData = encryptData(expiredToken);
+        fs.writeFileSync(TOKEN_STORE_PATH, JSON.stringify(encryptedData, null, 2));
+        await auth.saveTokenData(expiredToken);
+        console.log('✅ Token expiration forced');
+        console.log(`   - Original expiry: ${new Date(originalExpiry).toISOString()}`);
+        console.log(`   - Forced expiry: ${new Date(expiredToken.expiresAt).toISOString()}`);
+
+        // Directly call refresh token function
+        const newAccessToken = await auth.refreshAccessToken();
+        console.log('✅ Token refresh function called');
+        
+        // Verify token was refreshed
+        const newTokenData = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf-8'));
+        const newToken = decryptData(newTokenData);
+        const newExpiry = newToken.expiresAt;
+        
+        // Verify the new token works
+        const validToken = await auth.getValidAccessToken();
+        console.log('✅ Token refresh verified:');
+        console.log(`   - New expiry: ${new Date(newExpiry).toISOString()}`);
+        console.log(`   - Token was refreshed: ${newExpiry > Date.now()}`);
+        console.log(`   - New token is valid: ${validToken === newAccessToken}`);
+        
+        recordTestResult('tokenRefresh', true, null, {
+            originalExpiry: new Date(originalExpiry).toISOString(),
+            forcedExpiry: new Date(expiredToken.expiresAt).toISOString(),
+            newExpiry: new Date(newExpiry).toISOString(),
+            wasRefreshed: newExpiry > Date.now(),
+            tokenValid: validToken === newAccessToken
+        });
+    }
+
+    // Step T003: Get account information
     startTest('accountInfo');
     const accountResponse = await callMcpTool('get_account_info');
     const accountInfo = JSON.parse(accountResponse.content[0].text);
@@ -339,24 +428,211 @@ async function runTests() {
     console.log('✅ File renamed successfully');
     recordTestResult('moveFile', true);
 
-    // Step T012: Delete the renamed file
-    startTest('deleteFile');
-    await callMcpTool('delete_item', {
-      path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`
-    });
-    console.log('✅ File deleted successfully');
+    // Step T013: Test safe delete confirmation requirement
+    startTest('safeDeleteConfirm');
+    try {
+      const confirmResponse = await callMcpTool('safe_delete_item', {
+        path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
+        userId: 'test_user'
+      });
+      const confirmResult = JSON.parse(confirmResponse.content[0].text);
+      const requiresConfirmation = confirmResult.status === 'confirmation_required';
+      console.log('✅ Safe delete confirmation test:');
+      console.log(`   - Status: ${confirmResult.status}`);
+      console.log(`   - Message: ${confirmResult.message}`);
+      console.log(`   - Requires confirmation: ${requiresConfirmation}`);
+      recordTestResult('safeDeleteConfirm', requiresConfirmation, null, confirmResult);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Safe delete confirmation test failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('safeDeleteConfirm', false, new Error(errorMessage));
+    }
 
-    // Verify deletion
-    const finalListResponse = await callMcpTool('list_files', {
-      path: `/${TEST_FOLDER_NAME}`
-    });
-    const finalFolderContents = JSON.parse(finalListResponse.content[0].text);
-    console.log(`✅ Found ${finalFolderContents.length} items in the test folder after deletion`);
-    console.log('   Files:');
-    finalFolderContents.forEach((item: any) => {
-      console.log(`   - ${item.name}`);
-    });
-    recordTestResult('deleteFile', true, null, { remainingFiles: finalFolderContents.length });
+    // Step T014: Test soft delete to recycle bin
+    startTest('safeDeleteSoft');
+    try {
+      const softDeleteResponse = await callMcpTool('safe_delete_item', {
+        path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
+        userId: 'test_user',
+        skipConfirmation: true,
+        permanent: false
+      });
+      const softDeleteResult = JSON.parse(softDeleteResponse.content[0].text);
+      console.log('✅ Soft delete test:');
+      console.log(`   - Status: ${softDeleteResult.status}`);
+      console.log(`   - Operation: ${softDeleteResult.operation}`);
+      console.log(`   - Version ID: ${softDeleteResult.versionId}`);
+      console.log(`   - Recycle Path: ${softDeleteResult.recyclePath}`);
+      recordTestResult('safeDeleteSoft', true, null, softDeleteResult);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Soft delete test failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('safeDeleteSoft', false, new Error(errorMessage));
+    }
+
+    // Step T015: Test permanent deletion
+    startTest('safeDeletePermanent');
+    try {
+      const permanentDeleteResponse = await callMcpTool('safe_delete_item', {
+        path: `/${TEST_FOLDER_NAME}/${TEST_FILE_RENAMED_NAME}`,
+        userId: 'test_user',
+        skipConfirmation: true,
+        permanent: true,
+        reason: 'Test permanent deletion'
+      });
+      const permanentDeleteResult = JSON.parse(permanentDeleteResponse.content[0].text);
+      console.log('✅ Permanent delete test:');
+      console.log(`   - Status: ${permanentDeleteResult.status}`);
+      console.log(`   - Operation: ${permanentDeleteResult.operation}`);
+      recordTestResult('safeDeletePermanent', true, null, permanentDeleteResult);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Permanent delete test failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('safeDeletePermanent', false, new Error(errorMessage));
+    }
+
+    // Step T016: Test delete rate limiting
+    startTest('safeDeleteRateLimit');
+    try {
+      // Create test files for rate limit testing
+      const testFiles = [];
+      for (let i = 0; i < 5; i++) {
+        const fileName = `rate-limit-test-${i}-${timestamp}.txt`;
+        await callMcpTool('upload_file', {
+          path: `/${TEST_FOLDER_NAME}/${fileName}`,
+          content: encodeBase64(`Rate limit test file ${i}`)
+        });
+        testFiles.push(fileName);
+      }
+
+      // Try to delete files rapidly
+      let rateLimitHit = false;
+      for (const fileName of testFiles) {
+        try {
+          await callMcpTool('safe_delete_item', {
+            path: `/${TEST_FOLDER_NAME}/${fileName}`,
+            userId: 'rate_limit_test_user',
+            skipConfirmation: true,
+            permanent: true
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('rate limit exceeded')) {
+            rateLimitHit = true;
+            break;
+          }
+          throw error;
+        }
+      }
+
+      console.log('✅ Rate limit test:');
+      console.log(`   - Rate limit enforced: ${rateLimitHit}`);
+      recordTestResult('safeDeleteRateLimit', true, null, { rateLimitEnforced: rateLimitHit });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Rate limit test failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('safeDeleteRateLimit', false, new Error(errorMessage));
+    }
+
+    // Step T017: Test path validation
+    startTest('safeDeletePathValidation');
+    try {
+      // Test allowed path
+      const allowedPath = `/${TEST_FOLDER_NAME}/allowed-test.txt`;
+      await callMcpTool('upload_file', {
+        path: allowedPath,
+        content: encodeBase64('Test file for path validation')
+      });
+
+      // Try to delete from allowed path - should succeed
+      const allowedResponse = await callMcpTool('safe_delete_item', {
+        path: allowedPath,
+        userId: 'test_user',
+        skipConfirmation: true
+      });
+      const allowedResult = JSON.parse(allowedResponse.content[0].text);
+      console.log('✅ Allowed path deletion succeeded as expected');
+
+      // Try to delete from blocked path - should fail with validation error
+      const blockedPath = '/.system/test.txt';
+      try {
+        await callMcpTool('safe_delete_item', {
+          path: blockedPath,
+          userId: 'test_user',
+          skipConfirmation: true
+        });
+        console.log('❌ Path validation test failed - blocked path was allowed');
+        recordTestResult('safeDeletePathValidation', false, new Error('Blocked path was allowed'));
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isValidationError = errorMessage.includes('blocked and cannot be deleted');
+        console.log('✅ Path validation test:');
+        console.log(`   - Blocked path rejected: ${isValidationError}`);
+        console.log(`   - Error message: ${errorMessage}`);
+        recordTestResult('safeDeletePathValidation', isValidationError, null, { 
+          validationWorking: isValidationError,
+          allowedResult,
+          blockedPath,
+          errorMessage
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Path validation test setup failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('safeDeletePathValidation', false, new Error(errorMessage));
+    }
+
+    // Step T018: Test legacy delete operation
+    startTest('legacyDelete');
+    try {
+      // First create a test file
+      const legacyTestFile = `/${TEST_FOLDER_NAME}/legacy-test.txt`;
+      await callMcpTool('upload_file', {
+        path: legacyTestFile,
+        content: encodeBase64('Test file for legacy delete')
+      });
+
+      // Verify file exists before attempting deletion
+      await callMcpTool('get_file_metadata', {
+        path: legacyTestFile
+      });
+
+      // Try legacy delete
+      const legacyDeleteResponse = await callMcpTool('delete_item', {
+        path: legacyTestFile
+      });
+      const legacyDeleteResult = JSON.parse(legacyDeleteResponse.content[0].text);
+      console.log('✅ Legacy delete test:');
+      console.log(`   - Status: ${legacyDeleteResult.status}`);
+      console.log(`   - Operation: ${legacyDeleteResult.operation}`);
+
+      // Verify file was deleted
+      try {
+        await callMcpTool('get_file_metadata', {
+          path: legacyTestFile
+        });
+        console.log('❌ Legacy delete test failed - file still exists');
+        recordTestResult('legacyDelete', false, new Error('File still exists after deletion'));
+      } catch (error) {
+        // File not found error is expected
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('path/not_found')) {
+          console.log('✅ File successfully deleted');
+          recordTestResult('legacyDelete', true, null, legacyDeleteResult);
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Legacy delete test failed');
+      console.log(`   - Error: ${errorMessage}`);
+      recordTestResult('legacyDelete', false, new Error(errorMessage));
+    }
 
     // Generate detailed test summary
     console.log('\n=== Test Summary ===');

@@ -46,8 +46,44 @@ const toolDefinitions = [
       },
     },
     {
+      name: 'safe_delete_item',
+      description: 'Safely delete a file or folder with recycle bin support, confirmation, and audit logging',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Path to the file or folder to delete',
+          },
+          userId: {
+            type: 'string',
+            description: 'User ID for tracking and rate limiting',
+          },
+          skipConfirmation: {
+            type: 'boolean',
+            description: 'Skip deletion confirmation (default: false)',
+            default: false,
+          },
+          retentionDays: {
+            type: 'number',
+            description: 'Number of days to keep in recycle bin (default: from config)',
+          },
+          reason: {
+            type: 'string',
+            description: 'Reason for deletion (for audit logs)',
+          },
+          permanent: {
+            type: 'boolean',
+            description: 'Permanently delete instead of moving to recycle bin (default: false)',
+            default: false,
+          }
+        },
+        required: ['path', 'userId'],
+      },
+    },
+    {
       name: 'delete_item',
-      description: 'Delete a file or folder from Dropbox',
+      description: 'Legacy delete operation (deprecated, use safe_delete_item instead)',
       inputSchema: {
         type: 'object',
         properties: {

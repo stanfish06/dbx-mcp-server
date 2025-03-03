@@ -15,25 +15,8 @@ import { getValidAccessToken } from './auth.js';
 import { handleListPrompts, handleGetPrompt } from './prompt-handler.js';
 import { handleListResources, handleReadResource } from './resource-handler.js';
 import { toolDefinitions } from './tool-definitions.js';
-import { listFiles, uploadFile, downloadFile, deleteItem, createFolder, copyItem, moveItem, getFileMetadata, searchFiles, getSharingLink, getAccountInfo, getFileContent } from './dropbox-api.js';
-import winston from 'winston';
-
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  defaultMeta: { service: 'dropbox-mcp-server' },
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-  ],
-});
-
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.simple(),
-    stderrLevels: ['info', 'warn', 'error'] // Redirect all logs to stderr
-  }));
-}
+import { config, log } from './config.js';
+import * as dropboxApi from './dropbox-api.js';
 
 // Define resource templates
 const resourceTemplates = [
@@ -63,6 +46,21 @@ const resourceTemplates = [
   }
 ];
 
+interface SearchOptions {
+  query: string;
+  path?: string;
+  maxResults?: number;
+  fileExtensions?: string[];
+  fileCategories?: string[];
+  dateRange?: {
+    start: string;
+    end: string;
+  };
+  includeContentMatch?: boolean;
+  sortBy?: 'relevance' | 'last_modified_time' | 'file_size';
+  order?: 'asc' | 'desc';
+}
+
 class DropboxServer {
   private server: Server;
 
@@ -89,10 +87,18 @@ class DropboxServer {
 
     this.setupHandlers();
     this.setupPromptHandlers();
+
+    // Error handling
+    this.server.onerror = (error: Error & { code?: string }) => {
+      log.error('Server error:', { 
+        error: error.message, 
+        code: error.code,
+        stack: error.stack 
+      });
+    };
   }
 
   private setupPromptHandlers() {
-    // Prompt handlers
     this.server.setRequestHandler(ListPromptsRequestSchema, handleListPrompts);
     this.server.setRequestHandler(GetPromptRequestSchema, handleGetPrompt);
   }
@@ -106,94 +112,95 @@ class DropboxServer {
     }));
 
     // Tool handlers
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.error('Available tools:', toolDefinitions.map(t => t.name));
-      return {
-        tools: toolDefinitions,
-      };
-    });
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: toolDefinitions
+    }));
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-      console.error('Full request:', JSON.stringify(request, null, 2));
-      console.error('Method:', request.method);
-      console.error('Params:', JSON.stringify(request.params, null, 2));
-      // Verify authentication for all operations
-      try {
-        await getValidAccessToken();
-      } catch (error) {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      // Verify authentication
+      if (!config.dropbox.accessToken && !await getValidAccessToken()) {
         throw new McpError(
           ErrorCode.InvalidRequest,
-          'Authentication required. Please complete the OAuth setup:\n' +
-          '1. Run: node build/generate-auth-url.js\n' +
-          '2. Visit the URL and authorize the app\n' +
-          '3. Run: node build/exchange-code.js'
+          'No valid access token available. Please authenticate first.'
         );
       }
 
-      // Handle other tools
-      let result;
-      switch (request.params.name) {
-        case 'list_files':
-          result = await listFiles(String(request.params.arguments?.path || ''));
-          break;
-        case 'upload_file':
-          result = await uploadFile(
-            String(request.params.arguments?.path),
-            String(request.params.arguments?.content)
-          );
-          break;
-        case 'download_file':
-          result = await downloadFile(String(request.params.arguments?.path));
-          break;
-        case 'delete_item':
-          result = await deleteItem(String(request.params.arguments?.path));
-          break;
-        case 'create_folder':
-          result = await createFolder(String(request.params.arguments?.path));
-          break;
-        case 'copy_item':
-          result = await copyItem(
-            String(request.params.arguments?.from_path),
-            String(request.params.arguments?.to_path)
-          );
-          break;
-        case 'move_item':
-          result = await moveItem(
-            String(request.params.arguments?.from_path),
-            String(request.params.arguments?.to_path)
-          );
-          break;
-        case 'get_file_metadata':
-          result = await getFileMetadata(String(request.params.arguments?.path));
-          break;
-        case 'search_file_db':
-          result = await searchFiles({
-            query: String(request.params.arguments?.query),
-            path: String(request.params.arguments?.path || ''),
-            maxResults: Number(request.params.arguments?.max_results || 20),
-            fileExtensions: request.params.arguments?.file_extensions,
-            fileCategories: request.params.arguments?.file_categories,
-            dateRange: request.params.arguments?.date_range,
-            includeContentMatch: Boolean(request.params.arguments?.include_content_match),
-            sortBy: request.params.arguments?.sort_by || 'relevance',
-            order: request.params.arguments?.order || 'desc'
-          });
-          break;
-        case 'get_sharing_link':
-          result = await getSharingLink(String(request.params.arguments?.path));
-          break;
-        case 'get_account_info':
-          result = await getAccountInfo();
-          break;
-        case 'get_file_content':
-          result = await getFileContent(String(request.params.arguments?.path));
-          break;
-        default:
-          throw new McpError(
-            ErrorCode.MethodNotFound,
-            `Unknown tool: ${request.params.name}`
-          );
-      }
+      // Log request (without sensitive data)
+      log.info('Tool request:', { 
+        tool: request.params.name,
+        args: this.sanitizeArgs(request.params.arguments)
+      });
+
+      // Handle tool requests
+      const result = await (async () => {
+        switch (request.params.name) {
+          case 'list_files':
+            return await dropboxApi.listFiles(String(request.params.arguments?.path || ''));
+          case 'upload_file':
+            return await dropboxApi.uploadFile(
+              String(request.params.arguments?.path),
+              String(request.params.arguments?.content)
+            );
+          case 'download_file':
+            return await dropboxApi.downloadFile(String(request.params.arguments?.path));
+          case 'safe_delete_item':
+            return await dropboxApi.safeDeleteItem({
+              path: String(request.params.arguments?.path),
+              userId: String(request.params.arguments?.userId),
+              skipConfirmation: Boolean(request.params.arguments?.skipConfirmation),
+              retentionDays: Number(request.params.arguments?.retentionDays || config.safety.retentionDays),
+              reason: String(request.params.arguments?.reason || ''),
+              permanent: Boolean(request.params.arguments?.permanent)
+            });
+          case 'delete_item':
+            // Legacy delete operation - logs a warning and uses safe delete with default settings
+            log.warn('Legacy delete operation used', { path: request.params.arguments?.path });
+            return await dropboxApi.safeDeleteItem({
+              path: String(request.params.arguments?.path),
+              userId: 'legacy_user',
+              skipConfirmation: true,
+              permanent: true
+            });
+          case 'create_folder':
+            return await dropboxApi.createFolder(String(request.params.arguments?.path));
+          case 'copy_item':
+            return await dropboxApi.copyItem(
+              String(request.params.arguments?.from_path),
+              String(request.params.arguments?.to_path)
+            );
+          case 'move_item':
+            return await dropboxApi.moveItem(
+              String(request.params.arguments?.from_path),
+              String(request.params.arguments?.to_path)
+            );
+          case 'get_file_metadata':
+            return await dropboxApi.getFileMetadata(String(request.params.arguments?.path));
+          case 'search_file_db': {
+            const searchOptions: SearchOptions = {
+              query: String(request.params.arguments?.query),
+              path: String(request.params.arguments?.path || ''),
+              maxResults: Number(request.params.arguments?.max_results || 20),
+              fileExtensions: request.params.arguments?.file_extensions as string[] | undefined,
+              fileCategories: request.params.arguments?.file_categories as string[] | undefined,
+              dateRange: request.params.arguments?.date_range as { start: string; end: string } | undefined,
+              includeContentMatch: Boolean(request.params.arguments?.include_content_match),
+              sortBy: (request.params.arguments?.sort_by as SearchOptions['sortBy']) || 'relevance',
+              order: (request.params.arguments?.order as SearchOptions['order']) || 'desc'
+            };
+            return await dropboxApi.searchFiles(searchOptions);
+          }
+          case 'get_sharing_link':
+            return await dropboxApi.getSharingLink(String(request.params.arguments?.path));
+          case 'get_account_info':
+            return await dropboxApi.getAccountInfo();
+          default:
+            throw new McpError(
+              ErrorCode.MethodNotFound,
+              `Unknown tool: ${request.params.name}`
+            );
+        }
+      })();
+
       return {
         content: result.content,
         _meta: {}
@@ -201,10 +208,27 @@ class DropboxServer {
     });
   }
 
+  private sanitizeArgs(args: any): any {
+    if (!args) return args;
+    const sanitized = { ...args };
+    // Remove sensitive data from logs
+    if (sanitized.content) sanitized.content = '[CONTENT]';
+    return sanitized;
+  }
+
   async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    logger.info('Dropbox MCP server running on stdio');
+    try {
+      const transport = new StdioServerTransport();
+      log.info('Connecting to transport...');
+      await this.server.connect(transport);
+      log.info('Dropbox MCP server running on stdio');
+    } catch (error) {
+      log.error('Error connecting server:', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
   }
 }
 

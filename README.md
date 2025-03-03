@@ -1,54 +1,304 @@
 # Dropbox MCP Server
 
-This is a Model Context Protocol (MCP) server that integrates with Dropbox. It exposes a set of Dropbox operations as MCP tools, allowing MCP-compatible clients to interact with Dropbox.
+A Model Context Protocol (MCP) server that integrates with Dropbox, allowing MCP-compatible clients to interact with Dropbox through a set of powerful tools.
 
-## Tools
+## Table of Contents
 
-The following tools are available:
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Authentication](#authentication)
+  - [Initial Setup](#initial-setup)
+  - [Token Management](#token-management)
+  - [Refreshing Tokens](#refreshing-tokens)
+  - [Authentication Troubleshooting](#authentication-troubleshooting)
+- [Available Tools](#available-tools)
+- [Configuration](#configuration)
+- [Usage Examples](#usage-examples)
+- [Response Format](#response-format)
+- [Testing](#testing)
+- [Error Handling](#error-handling)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [License](#license)
 
-### list_files
+## Quick Start
+
+1. Clone the repository
+2. Run `npm install` to install dependencies
+3. Run `npm run build` to build the project
+4. Register a Dropbox app at [Dropbox App Console](https://www.dropbox.com/developers/apps)
+5. Create a `.env` file based on `.env.example` with your Dropbox app credentials
+6. Generate a random encryption key (see [Generating an Encryption Key](#generating-an-encryption-key))
+7. Complete the authentication process:
+   - Run `node build/generate-auth-url.js` to get an authorization URL
+   - Visit the URL in your browser and authorize the app
+   - Run `node build/exchange-code.js` and follow the prompts
+8. Configure your MCP client to use the server
+
+## Installation
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/your-username/dropbox-mcp-server.git
+   cd dropbox-mcp-server
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Build the project**
+
+   ```bash
+   npm run build
+   ```
+
+4. **Create a `.env` file**
+
+   Copy the example file and fill in your details:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Edit the `.env` file with your Dropbox app credentials and other settings.
+
+5. **Add to MCP settings**
+
+   Add the following to your MCP settings file:
+
+   ```json
+   {
+     "mcpServers": {
+       "dropbox": {
+         "command": "node",
+         "args": ["/path/to/dropbox-mcp-server/build/index.js"],
+         "env": {
+           "DROPBOX_APP_KEY": "your-app-key",
+           "DROPBOX_APP_SECRET": "your-app-secret",
+           "DROPBOX_REDIRECT_URI": "your-redirect-uri",
+           "TOKEN_ENCRYPTION_KEY": "your-32-char-encryption-key",
+           "CORS_ALLOWED_ORIGINS": "http://localhost:3000"
+         }
+       }
+     }
+   }
+   ```
+
+## Authentication
+
+The server uses OAuth 2.0 with PKCE (Proof Key for Code Exchange) for secure authentication with Dropbox.
+
+### Initial Setup
+
+1. **Register a Dropbox App**
+
+   - Go to the [Dropbox App Console](https://www.dropbox.com/developers/apps)
+   - Click "Create app"
+   - Choose "Scoped access" API
+   - Choose the access type your app needs (Full Dropbox or App folder)
+   - Name your app and click "Create app"
+   - Under "Permissions", select the required permissions:
+     - `files.metadata.read` - For listing files and metadata
+     - `files.content.read` - For downloading files
+     - `files.content.write` - For uploading, moving, and deleting files
+     - `sharing.write` - For creating sharing links
+     - `account_info.read` - For account information
+
+2. **Configure your app**
+
+   - Add your redirect URI (e.g., `http://localhost:3000/callback`) in the OAuth 2 settings
+   - Note your App key and App secret
+
+3. **Set environment variables**
+
+   Create a `.env` file with the following:
+
+   ```
+   DROPBOX_APP_KEY=your_app_key
+   DROPBOX_APP_SECRET=your_app_secret
+   DROPBOX_REDIRECT_URI=your_redirect_uri
+   TOKEN_ENCRYPTION_KEY=your_32_char_encryption_key
+   CORS_ALLOWED_ORIGINS=http://localhost:3000
+   ```
+
+   See [Generating an Encryption Key](#generating-an-encryption-key) for creating a secure TOKEN_ENCRYPTION_KEY.
+
+4. **Authentication Process**
+
+   The authentication process involves two steps:
+
+   **Step 1: Generate the authorization URL**
+
+   ```bash
+   node build/generate-auth-url.js
+   ```
+
+   This command will:
+
+   - Generate a code verifier (save this for the next step)
+   - Output an authorization URL
+   - Display instructions
+
+   **Step 2: Authorize and exchange the code**
+
+   - Visit the authorization URL in your browser
+   - Log in to Dropbox if needed
+   - Click "Allow" to authorize the application
+   - You'll be redirected to your redirect URI with an authorization code in the URL
+   - Run the exchange code script:
+     ```bash
+     node build/exchange-code.js
+     ```
+   - When prompted, enter:
+     - The authorization code from the redirect URL
+     - The code verifier from Step 1
+   - The script will exchange these for access and refresh tokens
+   - Tokens will be securely stored in `.tokens.json`
+
+### Generating an Encryption Key
+
+The `TOKEN_ENCRYPTION_KEY` is used to encrypt your Dropbox tokens. Generate a secure random key with:
+
+**On macOS/Linux:**
+
+```bash
+openssl rand -base64 32
+```
+
+**On Windows (PowerShell):**
+
+```powershell
+[Convert]::ToBase64String((New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes(32))
+```
+
+Copy the generated string to your `.env` file as the `TOKEN_ENCRYPTION_KEY` value.
+
+### Token Management
+
+Tokens are automatically managed by the server:
+
+- **Storage**: Tokens are securely stored in `.tokens.json` using Base64 encoding
+- **Validation**: Tokens are validated on server startup
+- **Encryption**: Your tokens are encrypted using the `TOKEN_ENCRYPTION_KEY`
+- **Expiration tracking**: The server tracks token expiration times
+
+### Refreshing Tokens
+
+The server handles token refreshing automatically:
+
+1. **Automatic refresh**: Access tokens are refreshed when they expire or are about to expire
+2. **Refresh threshold**: By default, tokens are refreshed 5 minutes before expiration
+3. **Retry mechanism**: If refresh fails, the server will retry with exponential backoff
+4. **Manual refresh**: You can manually update the access token using the `update_access_token` tool
+
+To configure token refresh behavior, set these environment variables:
+
+```
+TOKEN_REFRESH_THRESHOLD_MINUTES=5
+MAX_TOKEN_REFRESH_RETRIES=3
+TOKEN_REFRESH_RETRY_DELAY_MS=1000
+```
+
+### Authentication Troubleshooting
+
+If you encounter authentication issues:
+
+1. **Invalid or expired tokens**:
+
+   - Check if your tokens are valid and not expired
+   - Regenerate tokens using the authentication flow if needed
+   - Use the `update_access_token` tool to set a new token
+
+2. **Permission issues**:
+
+   - Verify your app has the necessary permission scopes
+   - Check the Dropbox App Console to ensure permissions are correctly set
+
+3. **Token file issues**:
+
+   - If `.tokens.json` is corrupted, delete it and re-authenticate
+   - Ensure the `TOKEN_ENCRYPTION_KEY` is consistent
+
+4. **Refresh token errors**:
+
+   - If refresh tokens fail, try re-authenticating from scratch
+   - Check Dropbox API status for any outages
+
+5. **Manual token creation**:
+   If you need to manually create a token file:
+
+   ```bash
+   # Set your access token in the environment
+   export DROPBOX_ACCESS_TOKEN=your_access_token
+
+   # Run the token creation script
+   node build/create-tokens.js
+   ```
+
+## Available Tools
+
+The server provides the following tools for interacting with Dropbox:
+
+### File Operations
+
+#### list_files
 
 Lists files and folders in a Dropbox directory.
 
-- **Input**:
-  - `path` (string, optional): Path to the folder (defaults to root "")
+- **Input**: `path` (string, optional): Path to the folder (defaults to root "")
 - **Output**: JSON array of file and folder entries with metadata
 
-### upload_file
+#### upload_file
 
 Upload a file to Dropbox.
 
 - **Input**:
-  - `path` (string, required): Path where the file should be uploaded (e.g., "/folder/file.txt")
+  - `path` (string, required): Path where the file should be uploaded
   - `content` (string, required): Base64-encoded file content
 - **Output**: Confirmation message with the file path
 
-### download_file
+#### download_file
 
-Download a file from Dropbox and return its content as base64-encoded text.
+Download a file from Dropbox.
 
-- **Input**:
-  - `path` (string, required): Path to the file to download from Dropbox
-- **Output**: Base64-encoded file content in the MCP response format
-- **Note**: The content is returned directly in the response, no local file storage is needed
+- **Input**: `path` (string, required): Path to the file to download
+- **Output**: Base64-encoded file content
 
-### delete_item
+#### safe_delete_item
 
-Delete a file or folder from Dropbox.
+Safely delete a file or folder with recycle bin support, confirmation, and audit logging.
 
 - **Input**:
   - `path` (string, required): Path to the file or folder to delete
-- **Output**: Confirmation message with the deleted path
+  - `userId` (string, required): User ID for tracking and rate limiting
+  - `skipConfirmation` (boolean, optional): Skip deletion confirmation (default: false)
+  - `retentionDays` (number, optional): Days to keep in recycle bin (default: from config)
+  - `reason` (string, optional): Reason for deletion (for audit logs)
+  - `permanent` (boolean, optional): Permanently delete instead of moving to recycle bin (default: false)
+- **Output**: JSON object with operation details:
+  - For confirmation requests: `{ status: 'confirmation_required', message, path, metadata }`
+  - For soft deletes: `{ status: 'success', operation: 'soft_delete', versionId, originalPath, recyclePath, expiresAt }`
+  - For permanent deletes: `{ status: 'success', operation: 'permanent_delete', path }`
 
-### create_folder
+#### delete_item (Legacy)
+
+Legacy delete operation (deprecated, uses safe_delete_item internally).
+
+- **Input**: `path` (string, required): Path to the file or folder to delete
+- **Output**: Same as safe_delete_item
+
+#### create_folder
 
 Create a new folder in Dropbox.
 
-- **Input**:
-  - `path` (string, required): Path where the folder should be created (e.g., "/New Folder")
+- **Input**: `path` (string, required): Path where the folder should be created
 - **Output**: Confirmation message with the created folder path
 
-### copy_item
+#### copy_item
 
 Copy a file or folder to a new location.
 
@@ -57,7 +307,7 @@ Copy a file or folder to a new location.
   - `to_path` (string, required): Path for the destination file or folder
 - **Output**: Confirmation message with both paths
 
-### move_item
+#### move_item
 
 Move or rename a file or folder.
 
@@ -66,207 +316,66 @@ Move or rename a file or folder.
   - `to_path` (string, required): New path for the file or folder
 - **Output**: Confirmation message with both paths
 
-### get_file_metadata
+### Metadata and Search
+
+#### get_file_metadata
 
 Get metadata for a file or folder.
 
-- **Input**:
-  - `path` (string, required): Path to the file or folder
+- **Input**: `path` (string, required): Path to the file or folder
 - **Output**: JSON object with file/folder metadata
 
-### search_file_db
+#### search_file_db
 
 Search for files and folders in Dropbox.
 
 - **Input**:
   - `query` (string, required): Search query string
   - `path` (string, optional): Path to search within (defaults to root)
-  - `max_results` (number, optional): Maximum number of results to return (1-1000, default: 20)
-- **Output**: JSON array of matching files and folders with metadata and highlight information
+  - `max_results` (number, optional): Maximum number of results (1-1000, default: 20)
+- **Output**: JSON array of matching files and folders with metadata
 
-### get_sharing_link
+#### get_sharing_link
 
 Create or retrieve a shared link for a file or folder.
 
 - **Input**:
   - `path` (string, required): Path to the file or folder to share
   - `settings` (object, optional): Sharing settings
-    - `requested_visibility` (object): Visibility settings (e.g., `{ ".tag": "public" }`)
-    - `audience` (object): Audience settings (e.g., `{ ".tag": "public" }`)
-    - `access` (object): Access level settings (e.g., `{ ".tag": "viewer" }`)
 - **Output**: JSON object with the shared URL and sharing information
-- **Note**: If a sharing link already exists, you may need to delete and recreate the file to generate a new link
 
-### get_file_content
+#### get_file_content
 
 Get the content of a file directly from Dropbox.
 
-- **Input**:
-  - `path` (string, required): Path to the file in Dropbox
-- **Output**: Base64-encoded file content in the MCP response format
+- **Input**: `path` (string, required): Path to the file in Dropbox
+- **Output**: Base64-encoded file content
 
-### get_account_info
+### Account and Authentication
+
+#### get_account_info
 
 Get information about the connected Dropbox account.
 
 - **Input**: None
-- **Output**: JSON object with account information in the MCP response format:
-  ```json
-  {
-    "content": [
-      {
-        "type": "text",
-        "text": {
-          "account_id": "dbid:...",
-          "name": {
-            "given_name": "...",
-            "surname": "...",
-            "familiar_name": "...",
-            "display_name": "...",
-            "abbreviated_name": "..."
-          },
-          "email": "...",
-          "email_verified": true,
-          "country": "...",
-          "locale": "...",
-          "team": null,
-          "account_type": "..."
-        }
-      }
-    ]
-  }
-  ```
+- **Output**: JSON object with account information
 
-### update_access_token
+#### update_access_token
 
-Update the Dropbox access token at runtime. This is particularly useful when:
+Update the Dropbox access token at runtime.
 
-- The token expires and needs to be refreshed
-- You want to switch between different Dropbox accounts
-- You need to update permissions without restarting the server
-
-- **Input**:
-  - `token` (string, required): New Dropbox access token
+- **Input**: `token` (string, required): New Dropbox access token
 - **Output**: Confirmation message
-- **Note**: The token must have the necessary permission scopes for the operations you plan to use
-
-## Authentication
-
-The server uses OAuth 2.0 with PKCE (Proof Key for Code Exchange) for secure authentication with Dropbox. This provides enhanced security and automatic token refresh capabilities.
-
-### Initial Setup
-
-1. Set the following environment variables in your `.env` file:
-
-   ```
-   DROPBOX_APP_KEY=your_app_key
-   DROPBOX_APP_SECRET=your_app_secret
-   DROPBOX_REDIRECT_URI=your_redirect_uri
-   ```
-
-2. Run the authorization URL generator:
-
-   ```bash
-   npm run build
-   node build/generate-auth-url.js
-   ```
-
-   This will output:
-
-   - An authorization URL to visit
-   - A code verifier to save for the next step
-
-3. Visit the authorization URL in your browser and approve the application
-
-4. After approval, you'll be redirected to your redirect URI with an authorization code
-
-5. Exchange the code for tokens using:
-   ```bash
-   node build/exchange-code.js
-   ```
-   You'll need to enter:
-   - The authorization code from the redirect
-   - The code verifier from step 2
-
-### Token Management
-
-The server implements enhanced secure token management with the following features:
-
-1. **Secure Storage**:
-
-   - Tokens are securely stored in `.tokens.json` using Base64 encoding
-   - Simple yet secure encryption mechanism for token data
-   - Encryption key is managed via environment variables
-   - Access and refresh tokens are managed automatically
-   - Token expiration is tracked and handled transparently
-   - Secure token validation on server startup
-   - Efficient token data serialization and deserialization
-   - Robust error handling for encryption/decryption operations
-
-2. **Automatic Token Refresh**:
-
-   - Access tokens are automatically refreshed when expired or about to expire
-   - Configurable refresh threshold (default: 5 minutes before expiration)
-   - Intelligent retry mechanism with exponential backoff
-   - Maximum retry attempts configurable via environment
-   - Refresh tokens are used to obtain new access tokens
-   - All operations handle token expiration gracefully
-
-3. **Error Handling**:
-   - Detailed error messages with specific error codes
-   - Automatic retry with fresh tokens when needed
-   - Rate limiting detection and handling
-   - Network error recovery with configurable retry attempts
-   - Invalid token detection and re-authentication prompts
-   - Proper error propagation to MCP clients
-
-### Security Best Practices
-
-1. **PKCE Implementation**:
-
-   - Uses cryptographically secure code verifiers
-   - Implements SHA-256 code challenge method
-   - Prevents authorization code interception attacks
-   - Validates all PKCE parameters
-   - Secure state parameter handling
-
-2. **Token Security**:
-
-   - Simple and secure token encryption
-   - Base64 encoding for safe data storage
-   - Secure encryption key management via environment variables
-   - Never commit `.tokens.json` or `.env` to version control
-   - Use proper file permissions for token storage
-   - Implement secure token transmission
-   - Automatic token data cleanup on errors
-   - Token validation on load
-   - Secure error handling for decryption failures
-   - Efficient memory management for token data
-
-3. **Error Management**:
-
-   - Comprehensive error type system with specific error codes
-   - Detailed error messages for troubleshooting
-   - Automatic recovery from token expiration
-   - Rate limit detection and handling
-   - Network error recovery with retries
-   - Clear guidance for re-authentication when needed
-
-4. **CORS Security**:
-   - Configurable CORS origins via environment variables
-   - Strict origin validation
-   - Default to secure settings
-   - Proper handling of preflight requests
 
 ## Configuration
 
 ### Environment Variables
 
-Required environment variables for authentication and security:
+Required environment variables:
 
-- `DROPBOX_APP_KEY`: Your Dropbox app's key (from App Console)
-- `DROPBOX_APP_SECRET`: Your Dropbox app's secret (from App Console)
-- `DROPBOX_REDIRECT_URI`: OAuth redirect URI (must match App Console)
+- `DROPBOX_APP_KEY`: Your Dropbox app's key
+- `DROPBOX_APP_SECRET`: Your Dropbox app's secret
+- `DROPBOX_REDIRECT_URI`: OAuth redirect URI
 - `TOKEN_ENCRYPTION_KEY`: 32+ character key for token encryption
 - `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 
@@ -276,63 +385,91 @@ Optional configuration variables:
 - `MAX_TOKEN_REFRESH_RETRIES`: Maximum number of refresh attempts (default: 3)
 - `TOKEN_REFRESH_RETRY_DELAY_MS`: Delay between refresh attempts in ms (default: 1000)
 
-### MCP Settings Configuration
+Safe Delete configuration:
 
-Add the following to your MCP settings file:
+- `DROPBOX_RECYCLE_BIN_PATH`: Path where deleted files are moved (default: /.recycle_bin)
+- `DROPBOX_MAX_DELETES_PER_DAY`: Maximum deletions per user per day (default: 100)
+- `DROPBOX_RETENTION_DAYS`: Days to keep files in recycle bin (default: 30)
+- `DROPBOX_ALLOWED_PATHS`: Comma-separated list of paths where deletion is allowed (default: /)
+- `DROPBOX_BLOCKED_PATHS`: Comma-separated list of paths where deletion is blocked (default: /.recycle_bin,/.system)
 
-```json
-{
-  "mcpServers": {
-    "dropbox": {
-      "command": "node",
-      "args": ["/path/to/dropbox-mcp-server/build/index.js"],
-      "env": {
-        "DROPBOX_APP_KEY": "your-app-key",
-        "DROPBOX_APP_SECRET": "your-app-secret",
-        "DROPBOX_REDIRECT_URI": "your-redirect-uri"
-      }
-    }
+## Usage Examples
+
+```typescript
+// Example: List files in root directory
+await mcp.useTool("dropbox-mcp-server", "list_files", { path: "" });
+
+// Example: Upload a file
+await mcp.useTool("dropbox-mcp-server", "upload_file", {
+  path: "/test.txt",
+  content: Buffer.from("Hello World").toString("base64"),
+});
+
+// Example: Download and read a file
+const result = await mcp.useTool("dropbox-mcp-server", "download_file", {
+  path: "/test.txt",
+});
+const base64Content = result.content[0].text;
+const fileContent = Buffer.from(base64Content, "base64").toString("utf8");
+
+// Example: Create a folder
+await mcp.useTool("dropbox-mcp-server", "create_folder", {
+  path: "/New Folder",
+});
+
+// Example: Search for files
+await mcp.useTool("dropbox-mcp-server", "search_file_db", {
+  query: "report",
+  path: "/Documents",
+  max_results: 10,
+});
+
+// Example: Get account information
+await mcp.useTool("dropbox-mcp-server", "get_account_info", {});
+
+// Example: Safe delete with confirmation
+const confirmResult = await mcp.useTool(
+  "dropbox-mcp-server",
+  "safe_delete_item",
+  {
+    path: "/Documents/old-report.txt",
+    userId: "user123",
   }
-}
+);
+// confirmResult will have status: 'confirmation_required'
+
+// Example: Soft delete to recycle bin
+const softDeleteResult = await mcp.useTool(
+  "dropbox-mcp-server",
+  "safe_delete_item",
+  {
+    path: "/Documents/old-report.txt",
+    userId: "user123",
+    skipConfirmation: true,
+    reason: "Document is obsolete",
+  }
+);
+// File will be moved to recycle bin with version history
+
+// Example: Permanent deletion
+const permanentDeleteResult = await mcp.useTool(
+  "dropbox-mcp-server",
+  "safe_delete_item",
+  {
+    path: "/Documents/sensitive-file.txt",
+    userId: "user123",
+    skipConfirmation: true,
+    permanent: true,
+    reason: "Contains sensitive information",
+  }
+);
+// File will be permanently deleted
+
+// Example: Legacy delete operation (deprecated)
+await mcp.useTool("dropbox-mcp-server", "delete_item", {
+  path: "/Documents/old-file.txt",
+});
 ```
-
-The server will handle token management automatically using the PKCE OAuth flow.
-
-## Usage
-
-1. Install the server by adding the MCP server configuration to your settings file with your Dropbox app credentials
-
-2. Complete the initial authentication:
-
-   ```bash
-   # Generate auth URL and get code verifier
-   node build/generate-auth-url.js
-
-   # Visit the URL in browser and authorize
-   # After redirect, exchange the code for tokens
-   node build/exchange-code.js
-   ```
-
-3. The server will automatically handle token refresh. Start using the tools:
-
-   ```typescript
-   // Example: List files in root directory
-   await mcp.useTool("dropbox-mcp-server", "list_files", { path: "" });
-
-   // Example: Upload a file
-   await mcp.useTool("dropbox-mcp-server", "upload_file", {
-     path: "/test.txt",
-     content: Buffer.from("Hello World").toString("base64"),
-   });
-
-   // Example: Download and read a file
-   const result = await mcp.useTool("dropbox-mcp-server", "download_file", {
-     path: "/test.txt",
-   });
-   const base64Content = result.content[0].text;
-   const fileContent = Buffer.from(base64Content, "base64").toString("utf8");
-   // ... use the file content ...
-   ```
 
 ## Response Format
 
@@ -353,44 +490,28 @@ All tools return responses in the MCP format:
 
 ## Testing
 
-The server includes a comprehensive test suite that verifies all Dropbox operations. The test suite:
-
-1. Tests all available tools with proper response format validation
-2. Provides detailed output for each operation
-3. Handles error cases gracefully
-4. Cleans up after itself completely
-5. Verifies file content integrity with base64 encoding
-6. Tests search functionality with the correct tool name (search_file_db)
-7. Validates sharing link responses
+The server includes a comprehensive test suite that verifies all Dropbox operations.
 
 ### Running the Tests
 
-To run the tests:
-
 1. Make sure you have a valid Dropbox access token in a file named `token` in the root directory
-2. Install the required dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the test suite using the provided script:
+2. Run the test suite:
 
    ```bash
    ./run-tests.sh
    ```
 
-   This script sets the Dropbox access token as an environment variable before running the tests, which helps avoid authentication issues.
-
-   Alternatively, you can run the tests directly:
+   Or directly:
 
    ```bash
    npm test
    ```
 
-The test will create a folder named "MCP Test Folder" in your Dropbox root and perform various operations within it. The test file will remain in your Dropbox after the test completes.
+The test will create a folder named "MCP Test Folder" in your Dropbox root and perform various operations within it.
 
 ### Test Coverage
 
-The test suite covers all major operations and has been verified to pass successfully:
+The test suite covers all major operations:
 
 - ✅ Token encryption and secure storage
 - ✅ Authentication and access token management
@@ -399,59 +520,11 @@ The test suite covers all major operations and has been verified to pass success
 - ✅ Folder creation
 - ✅ File upload and download
 - ✅ File metadata retrieval
-- ✅ File sharing link creation (handles existing links)
+- ✅ File sharing link creation
 - ✅ File searching with advanced filters
 - ✅ File copying and moving
 - ✅ File deletion
 - ✅ Error handling and recovery
-
-All tests have been verified to pass with proper cleanup and error handling.
-
-### Custom Testing
-
-You can modify the test configuration in `tests/dropbox-operations.test.js` to test with different file names, content, or paths.
-
-### Required Permissions
-
-The Dropbox MCP server requires specific permission scopes to be enabled for your Dropbox access token. Different operations require different permission scopes:
-
-| Operation             | Required Permission Scope                   |
-| --------------------- | ------------------------------------------- |
-| List files            | `files.metadata.read`                       |
-| Upload/download files | `files.content.write`, `files.content.read` |
-| Create folders        | `files.content.write`                       |
-| Get file metadata     | `files.metadata.read`                       |
-| Copy/move files       | `files.content.write`                       |
-| Delete files          | `files.content.write`                       |
-| Search files          | `files.metadata.read`                       |
-| Create sharing links  | `sharing.write`                             |
-| Get account info      | `account_info.read`                         |
-
-When generating your access token from the Dropbox App Console, make sure to enable all the permission scopes needed for the operations you plan to use.
-
-### Known Limitations
-
-The test script has the following known limitations:
-
-1. **Authentication Persistence**: Each MCP operation spawns a new server process, and the access token is not persisted between operations. The test script attempts to handle this by detecting authentication errors and re-authenticating, but this may not always work perfectly.
-
-2. **Sharing Link Creation**:
-   - Creating sharing links requires the `sharing.write` permission scope in the Dropbox API
-   - If a sharing link already exists for a file, the API returns a "shared_link_already_exists" response, which is handled gracefully
-   - The test considers both new link creation and "already exists" responses as successful outcomes
-   - You can enable the sharing permission in the Dropbox App Console under the "Permissions" tab
-
-### Troubleshooting Tests
-
-If you encounter issues with the tests:
-
-1. **Check your access token**: Make sure your token in the `token` file is valid and has the necessary permissions.
-
-2. **Run tests individually**: You can modify the test script to run only specific operations by commenting out the others.
-
-3. **Increase verbosity**: The test script logs detailed responses for debugging. Look for error messages in these responses.
-
-4. **Check Dropbox API status**: If you're experiencing persistent issues, check if the Dropbox API is experiencing any outages.
 
 ## Error Handling
 
@@ -467,18 +540,30 @@ The server provides detailed error messages for common issues:
 
 If you encounter issues:
 
-1. Check authentication:
-   - Verify the access token is valid and not expired
-   - Use `update_access_token` to set a new token if needed
-2. Verify paths:
+1. **Authentication problems**:
+
+   - Follow the [Authentication Troubleshooting](#authentication-troubleshooting) section
+   - Check if your app has the necessary permission scopes
+
+2. **Path formatting issues**:
+
    - Paths should be properly formatted (e.g., "/folder/file.txt")
    - Root directory is represented by an empty string ""
-3. Check file operations:
+
+3. **File operation errors**:
+
    - Ensure you have the necessary permissions
    - Verify base64 encoding/decoding for file content
-4. Monitor server logs:
-   - The server provides detailed error messages
-   - Check response data for API-specific error details
+   - Check if files exist before attempting operations
+
+4. **Rate limiting**:
+
+   - If you hit rate limits, implement exponential backoff
+   - Consider batching operations when possible
+
+5. **Server logs**:
+   - Check server logs for detailed error messages
+   - Look for specific error codes in the response
 
 ## Development
 
@@ -491,77 +576,16 @@ Built with:
 
 ### Code Organization
 
-The server leverages the official Dropbox SDK for all API operations:
+The server is organized into several key modules:
 
-- Type-safe API calls with built-in TypeScript support
-- Automatic request/response handling and serialization
-- Built-in retry logic and error handling
-- Simplified authentication management
+- `auth.ts`: Handles authentication and token management
+- `dropbox-api.ts`: Provides functions for interacting with the Dropbox API
+- `dropbox-server.ts`: Sets up the MCP server and registers handlers
+- `tool-definitions.ts`: Defines the available tools
+- `resource-handler.ts`: Handles resource listing and reading
+- `security-utils.ts`: Provides security utilities
 
-The codebase follows clean code principles:
-
-- Consistent use of Dropbox SDK methods
-- Standardized error handling with proper error codes
-- Clear separation of concerns between modules
-- Type-safe operations with TypeScript interfaces
-
-### Implementation Details
-
-The server uses the Dropbox SDK to handle all API operations, which provides several benefits:
-
-1. **Type Safety**:
-
-   - Full TypeScript support for all API methods
-   - Compile-time checking of API parameters
-   - Automatic type inference for API responses
-
-2. **Error Handling**:
-
-   - Standardized error responses
-   - Built-in handling of rate limits and retries
-   - Proper error categorization (auth, permissions, etc.)
-
-3. **Authentication**:
-
-   - Automatic token management
-   - Built-in token refresh handling
-   - Proper scope validation
-
-4. **Performance**:
-
-   - Optimized request handling
-   - Connection pooling
-   - Automatic request retries
-
-5. **File Handling**:
-   - Binary files saved to system temp directory
-   - Automatic cleanup handled by OS
-   - Safe concurrent downloads with unique filenames
-   - Cross-platform compatibility using os.tmpdir()
-
-## Recent Improvements
-
-1. **Enhanced Token Security**:
-
-   - Simplified token encryption using Base64 encoding
-   - Improved error handling for encryption/decryption operations
-   - More efficient token data serialization
-   - Better validation of token data structure
-
-2. **Test Suite Enhancements**:
-
-   - Added token encryption validation tests
-   - Improved error handling test coverage
-   - Better cleanup after test execution
-   - More detailed test output and logging
-
-3. **Code Quality**:
-   - Simplified encryption implementation
-   - Improved type safety
-   - Better error messages
-   - Enhanced code documentation
-
-## Future Roadmap
+### Future Roadmap
 
 1. **Feature Enhancements**:
 
@@ -572,27 +596,11 @@ The server uses the Dropbox SDK to handle all API operations, which provides sev
    - Large file upload support
 
 2. **Security Improvements**:
-
    - Token rotation
    - Rate limiting
    - Custom encryption keys
    - Audit logging
    - Access permissions
-
-3. **Performance Optimizations**:
-
-   - Response caching
-   - Connection pooling
-   - Request batching
-   - Parallel transfers
-   - Compression support
-
-4. **Developer Experience**:
-   - OpenAPI documentation
-   - Better TypeScript types
-   - More examples
-   - Development mode
-   - Enhanced debugging
 
 ## License
 

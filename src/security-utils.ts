@@ -1,4 +1,4 @@
-import CryptoJS from 'crypto-js';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 
@@ -16,16 +16,40 @@ if (!TOKEN_ENCRYPTION_KEY || TOKEN_ENCRYPTION_KEY.length < 32) {
 const validatedKey: string = TOKEN_ENCRYPTION_KEY;
 
 export interface EncryptedTokenData {
+    iv: string;
     encryptedData: string;
 }
 
+const ALGORITHM = 'aes-256-gcm';
+
 export function encryptData(data: any): EncryptedTokenData {
     try {
+        // Generate a random initialization vector
+        const iv = randomBytes(16);
+        
+        // Create cipher with key and iv
+        const cipher = createCipheriv(
+            ALGORITHM, 
+            Buffer.from(validatedKey.slice(0, 32)), 
+            iv
+        );
+        
+        // Convert data to JSON string
         const jsonStr = JSON.stringify(data);
-        const wordArray = CryptoJS.enc.Utf8.parse(jsonStr);
-        const encrypted = CryptoJS.enc.Base64.stringify(wordArray);
+        
+        // Encrypt the data
+        let encryptedData = cipher.update(jsonStr, 'utf8', 'hex');
+        encryptedData += cipher.final('hex');
+        
+        // Get the auth tag
+        const authTag = cipher.getAuthTag();
+        
+        // Combine the encrypted data and auth tag
+        const finalEncryptedData = encryptedData + authTag.toString('hex');
+        
         return {
-            encryptedData: encrypted
+            iv: iv.toString('hex'),
+            encryptedData: finalEncryptedData
         };
     } catch (error) {
         console.error('Encryption error:', error);
@@ -38,17 +62,39 @@ export function encryptData(data: any): EncryptedTokenData {
 
 export function decryptData(encryptedData: EncryptedTokenData): any {
     try {
-        const wordArray = CryptoJS.enc.Base64.parse(encryptedData.encryptedData);
-        const jsonStr = CryptoJS.enc.Utf8.stringify(wordArray);
-        if (!jsonStr) {
+        // Extract the auth tag from the end of the encrypted data (last 16 bytes)
+        const authTagLength = 32; // 16 bytes in hex = 32 characters
+        const encryptedHex = encryptedData.encryptedData;
+        const authTag = Buffer.from(
+            encryptedHex.slice(-authTagLength), 
+            'hex'
+        );
+        const encryptedContent = encryptedHex.slice(0, -authTagLength);
+        
+        // Create decipher
+        const decipher = createDecipheriv(
+            ALGORITHM,
+            Buffer.from(validatedKey.slice(0, 32)),
+            Buffer.from(encryptedData.iv, 'hex')
+        );
+        
+        // Set auth tag
+        decipher.setAuthTag(authTag);
+        
+        // Decrypt the data
+        let decrypted = decipher.update(encryptedContent, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        
+        if (!decrypted) {
             throw new Error('Decryption produced empty result');
         }
-        return JSON.parse(jsonStr);
+        
+        return JSON.parse(decrypted);
     } catch (error) {
         console.error('Decryption error:', error);
         throw new McpError(
             ErrorCode.InternalError,
-            'Failed to decrypt token data'
+            'Failed to decrypt token data. The data may be corrupted or the encryption key may be invalid.'
         );
     }
 }

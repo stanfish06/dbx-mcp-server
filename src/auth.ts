@@ -24,6 +24,7 @@ interface TokenData {
     scope: string[];
     lastRefreshAttempt?: number;
     refreshAttempts?: number;
+    codeVerifier?: string; // PKCE code verifier needed for token refresh
 }
 
 const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || '';
@@ -42,7 +43,12 @@ const validatedAppKey: string = DROPBOX_APP_KEY;
 const validatedAppSecret: string = DROPBOX_APP_SECRET;
 const validatedRedirectUri: string = DROPBOX_REDIRECT_URI;
 
-let tokenData: TokenData | null = loadTokenData();
+let tokenData: TokenData | null = process.env.DROPBOX_ACCESS_TOKEN ? {
+    accessToken: process.env.DROPBOX_ACCESS_TOKEN,
+    refreshToken: '',
+    expiresAt: Date.now() + (4 * 60 * 60 * 1000), // 4 hours from now
+    scope: ['files.content.read', 'files.content.write']
+} : loadTokenData();
 
 // Error messages map for better error handling
 const ERROR_MESSAGES = {
@@ -132,7 +138,8 @@ async function exchangeCodeForTokens(code: string, codeVerifier: string): Promis
             accessToken: response.data.access_token,
             refreshToken: response.data.refresh_token,
             expiresAt: Date.now() + (response.data.expires_in * 1000),
-            scope: response.data.scope.split(' ')
+            scope: response.data.scope.split(' '),
+            codeVerifier // Store code verifier for token refresh
         };
 
         saveTokenData(tokenData);
@@ -186,7 +193,7 @@ async function refreshAccessToken(): Promise<string> {
     }
 
     try {
-        const params = new URLSearchParams({
+        const searchParams = new URLSearchParams({
             refresh_token: tokenData.refreshToken,
             grant_type: 'refresh_token',
             client_id: validatedAppKey,
@@ -195,7 +202,7 @@ async function refreshAccessToken(): Promise<string> {
 
         const response = await axios.post(
             'https://api.dropboxapi.com/oauth2/token',
-            params.toString(),
+            searchParams.toString(),
             {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -315,5 +322,7 @@ export {
     exchangeCodeForTokens, 
     refreshAccessToken, 
     getValidAccessToken,
+    loadTokenData,
+    saveTokenData,
     TokenData
 };

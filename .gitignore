@@ -12,6 +12,8 @@ token
 *.cert
 credentials.txt
 *credentials*.txt
+src/config.ts
+config.ts
 
 # Logs and debugging
 *.log
@@ -56,3 +58,4 @@ out/
 Dockerfile
 .dockerignore
 getToken
+README.md

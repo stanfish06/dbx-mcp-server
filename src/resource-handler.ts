@@ -1,5 +1,5 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { listFiles, downloadFile, getFileMetadata, getFileContent } from './dropbox-api.js';
+import { listFiles, downloadFile, getFileMetadata } from './dropbox-api.js';
 
 // Interface for resource metadata
 interface ResourceMetadata {
@@ -149,7 +149,7 @@ async function handleReadResource(request: any): Promise<any> {
 
     // Try to get the file directly first
     try {
-      const result = await getFileContent(path);
+      const result = await downloadFile(path);
       const mimeType = getMimeType(path);
       const metadata = await getFileMetadata(path);
       const metadataObj = JSON.parse(metadata.content[0].text);
