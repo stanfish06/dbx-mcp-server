@@ -1,5 +1,5 @@
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { listFiles, downloadFile, getFileMetadata } from './dropbox-api.js';
+import { listFiles, downloadFile, getFileMetadata } from './dbx-api.js';
 
 // Interface for resource metadata
 interface ResourceMetadata {
@@ -93,13 +93,13 @@ async function handleListResources(request: any): Promise<any> {
         undefined;
 
       return {
-        uri: `dropbox://${normalizePath(item.path_display)}`,
+        uri: `dbx://${normalizePath(item.path_display)}`,
         name: item.name,
-        type: item['.tag'] === 'file' ? 'dropbox-file' : 'dropbox-folder',
+        type: item['.tag'] === 'file' ? 'dbx-file' : 'dbx-folder',
         mimeType,
         description: item['.tag'] === 'folder' ?
-          `Dropbox folder containing: ${children || 'empty'}` :
-          `Dropbox file (${mimeType})`,
+          `Folder containing: ${children || 'empty'} (integrates with Dropbox)` :
+          `File (${mimeType}) (integrates with Dropbox)`,
         metadata: getResourceMetadata(item, items)
       };
     });
@@ -127,7 +127,7 @@ async function handleReadResource(request: any): Promise<any> {
     const uri = request.params.uri;
     
     // Validate and parse URI
-    if (!uri.startsWith('dropbox://')) {
+    if (!uri.startsWith('dbx://')) {
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Invalid URI format: ${uri}`
@@ -136,15 +136,15 @@ async function handleReadResource(request: any): Promise<any> {
 
     // Handle URI templates
     let path = '';
-    if (uri.startsWith('dropbox:///shared/')) {
-      const shareId = uri.replace('dropbox:///shared/', '');
+    if (uri.startsWith('dbx:///shared/')) {
+      const shareId = uri.replace('dbx:///shared/', '');
       // Here you would implement share ID resolution logic
       throw new McpError(
         ErrorCode.MethodNotFound,
         'Shared item access not yet implemented'
       );
     } else {
-      path = normalizePath(uri.replace('dropbox://', ''));
+      path = normalizePath(uri.replace('dbx://', ''));
     }
 
     // Try to get the file directly first

@@ -677,6 +677,42 @@ async function getAccountInfo(): Promise<McpToolResponse> {
     }
 }
 
+async function getFileContent(path: string): Promise<McpToolResponse> {
+    try {
+        const client = await getDropboxClient();
+        
+        // Get metadata first to verify it's a file
+        const metadata = await client.filesGetMetadata({
+            path: formatDropboxPath(path)
+        });
+        
+        if (metadata.result['.tag'] !== 'file') {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                'Cannot get content of a folder'
+            );
+        }
+
+        const response = await client.filesDownload({ 
+            path: formatDropboxPath(path)
+        });
+
+        const fileData = response.result as any;
+        if (!fileData?.fileBinary) {
+            throw new Error('No file data received from Dropbox');
+        }
+
+        return {
+            content: [{
+                type: 'text',
+                text: fileData.fileBinary.toString('utf-8')
+            }],
+        };
+    } catch (error: any) {
+        handleDropboxError(error);
+    }
+}
+
 export { 
     listFiles, 
     uploadFile, 
@@ -690,4 +726,5 @@ export {
     searchFiles, 
     getSharingLink, 
     getAccountInfo,
+    getFileContent,
 };

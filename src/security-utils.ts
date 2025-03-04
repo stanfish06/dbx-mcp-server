@@ -1,19 +1,33 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-const TOKEN_ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY || '';
-if (!TOKEN_ENCRYPTION_KEY || TOKEN_ENCRYPTION_KEY.length < 32) {
-    throw new McpError(
-        ErrorCode.InvalidParams,
-        'TOKEN_ENCRYPTION_KEY must be set in environment variables and be at least 32 characters long'
-    );
-}
+function getValidatedKey() {
+    const key = process.env.TOKEN_ENCRYPTION_KEY || '';
+    if (!key) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            'TOKEN_ENCRYPTION_KEY must be set in environment variables'
+        );
+    }
 
-// After validation, we know this is a non-empty string
-const validatedKey: string = TOKEN_ENCRYPTION_KEY;
+    // Convert base64 key to buffer if it's base64 encoded
+    const validatedKey = key.includes('+') || key.includes('/') || key.includes('=')
+        ? Buffer.from(key, 'base64')
+        : Buffer.from(key);
+
+    // Ensure key is 32 bytes
+    if (validatedKey.length < 32) {
+        throw new McpError(
+            ErrorCode.InvalidParams,
+            'TOKEN_ENCRYPTION_KEY must be at least 32 bytes when decoded'
+        );
+    }
+
+    return validatedKey;
+}
 
 export interface EncryptedTokenData {
     iv: string;
@@ -30,7 +44,7 @@ export function encryptData(data: any): EncryptedTokenData {
         // Create cipher with key and iv
         const cipher = createCipheriv(
             ALGORITHM, 
-            Buffer.from(validatedKey.slice(0, 32)), 
+            getValidatedKey().slice(0, 32), 
             iv
         );
         
@@ -74,7 +88,7 @@ export function decryptData(encryptedData: EncryptedTokenData): any {
         // Create decipher
         const decipher = createDecipheriv(
             ALGORITHM,
-            Buffer.from(validatedKey.slice(0, 32)),
+            getValidatedKey().slice(0, 32),
             Buffer.from(encryptedData.iv, 'hex')
         );
         

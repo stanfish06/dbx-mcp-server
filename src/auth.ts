@@ -12,10 +12,11 @@ import {
     TOKEN_REFRESH_CONFIG,
     EncryptedTokenData
 } from './security-utils.js';
+import { config } from './config.js';
 
 dotenv.config();
 
-const TOKEN_STORE_PATH = path.join(process.cwd(), '.tokens.json');
+const TOKEN_STORE_PATH = process.env.TOKEN_STORE_PATH || path.join(process.cwd(), '.tokens.json');
 
 interface TokenData {
     accessToken: string;
@@ -27,21 +28,19 @@ interface TokenData {
     codeVerifier?: string; // PKCE code verifier needed for token refresh
 }
 
-const DROPBOX_APP_KEY = process.env.DROPBOX_APP_KEY || '';
-const DROPBOX_APP_SECRET = process.env.DROPBOX_APP_SECRET || '';
-const DROPBOX_REDIRECT_URI = process.env.DROPBOX_REDIRECT_URI || '';
+// Use config values which handle encrypted secrets
+const validatedAppKey: string = config.dropbox.appKey;
+const validatedAppSecret: string = config.dropbox.appSecret;
+const validatedRedirectUri: string = config.dropbox.redirectUri;
 
-if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET || !DROPBOX_REDIRECT_URI) {
+// Skip validation during setup
+const isSetup = process.argv[1]?.endsWith('setup.js');
+if (!isSetup && (!validatedAppKey || !validatedAppSecret || !validatedRedirectUri)) {
     throw new McpError(
         ErrorCode.InvalidParams,
-        'Missing required environment variables. Please ensure DROPBOX_APP_KEY, DROPBOX_APP_SECRET, and DROPBOX_REDIRECT_URI are set in your .env file.'
+        'Missing required configuration. Please ensure API credentials are properly set.'
     );
 }
-
-// Ensure these are strings after validation
-const validatedAppKey: string = DROPBOX_APP_KEY;
-const validatedAppSecret: string = DROPBOX_APP_SECRET;
-const validatedRedirectUri: string = DROPBOX_REDIRECT_URI;
 
 let tokenData: TokenData | null = process.env.DROPBOX_ACCESS_TOKEN ? {
     accessToken: process.env.DROPBOX_ACCESS_TOKEN,
@@ -57,7 +56,7 @@ const ERROR_MESSAGES = {
     INVALID_GRANT: 'The refresh token is invalid or has been revoked. Please re-authenticate.',
     NETWORK_ERROR: 'Network error occurred while refreshing token. Will retry...',
     RATE_LIMIT: 'Rate limit exceeded. Please try again later.',
-    SERVER_ERROR: 'Dropbox server error occurred. Will retry...'
+    SERVER_ERROR: 'API server error occurred. Will retry...'
 };
 
 function generatePKCE(): { codeVerifier: string; codeChallenge: string } {
@@ -70,12 +69,49 @@ function generatePKCE(): { codeVerifier: string; codeChallenge: string } {
 
 function loadTokenData(): TokenData | null {
     try {
+        // Use logger instead of console.error to avoid polluting the JSON structure
+        if (process.env.NODE_ENV === 'development') {
+            console.error('Loading tokens from:', TOKEN_STORE_PATH);
+        }
+        
         if (fs.existsSync(TOKEN_STORE_PATH)) {
-            const encryptedData = JSON.parse(fs.readFileSync(TOKEN_STORE_PATH, 'utf-8')) as EncryptedTokenData;
-            return decryptData(encryptedData) as TokenData;
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Token file exists');
+            }
+            
+            const rawData = fs.readFileSync(TOKEN_STORE_PATH, 'utf-8');
+            
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Raw token data length:', rawData.length);
+            }
+            
+            const encryptedData = JSON.parse(rawData) as EncryptedTokenData;
+            
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Parsed encrypted data:', {
+                    hasIv: !!encryptedData.iv,
+                    encryptedDataLength: encryptedData.encryptedData?.length
+                });
+            }
+            
+            const decrypted = decryptData(encryptedData) as TokenData;
+            
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Token data decrypted successfully');
+            }
+            
+            return decrypted;
+        } else {
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Token file not found');
+            }
         }
     } catch (error) {
         console.error('Error loading token data:', error);
+        if (process.env.NODE_ENV === 'development') {
+            console.error('Current working directory:', process.cwd());
+        }
+        
         throw new McpError(
             ErrorCode.InternalError,
             'Failed to load token data. The token file may be corrupted or encryption key may be invalid.'
@@ -101,9 +137,14 @@ function saveTokenData(data: TokenData): void {
 function generateAuthUrl(): { url: string; codeVerifier: string } {
     const { codeVerifier, codeChallenge } = generatePKCE();
     const authUrl = new URL('https://www.dropbox.com/oauth2/authorize');
-    authUrl.searchParams.append('client_id', DROPBOX_APP_KEY);
+    
+    // During setup, use process.env directly
+    const isSetup = process.argv[1]?.endsWith('setup.js');
+    const clientId = isSetup ? process.env.DROPBOX_APP_KEY : validatedAppKey;
+    
+    authUrl.searchParams.append('client_id', clientId!);
     authUrl.searchParams.append('response_type', 'code');
-    authUrl.searchParams.append('redirect_uri', DROPBOX_REDIRECT_URI);
+    authUrl.searchParams.append('redirect_uri', 'http://localhost');
     authUrl.searchParams.append('code_challenge', codeChallenge);
     authUrl.searchParams.append('code_challenge_method', 'S256');
     authUrl.searchParams.append('token_access_type', 'offline');
@@ -112,15 +153,20 @@ function generateAuthUrl(): { url: string; codeVerifier: string } {
         codeVerifier 
     };
 }
-
+ 
 async function exchangeCodeForTokens(code: string, codeVerifier: string): Promise<TokenData> {
     try {
+        // During setup, use process.env directly
+        const isSetup = process.argv[1]?.endsWith('setup.js');
+        const clientId = isSetup ? process.env.DROPBOX_APP_KEY : validatedAppKey;
+        const clientSecret = isSetup ? process.env.DROPBOX_APP_SECRET : validatedAppSecret;
+        
         const params = new URLSearchParams({
             code,
             grant_type: 'authorization_code',
-            client_id: validatedAppKey,
-            client_secret: validatedAppSecret,
-            redirect_uri: validatedRedirectUri,
+            client_id: clientId!,
+            client_secret: clientSecret!,
+            redirect_uri: 'http://localhost',
             code_verifier: codeVerifier
         });
 
@@ -165,7 +211,7 @@ async function refreshAccessToken(): Promise<string> {
     if (!tokenData?.refreshToken) {
         throw new McpError(
             ErrorCode.InvalidRequest,
-            'No refresh token available. Please authenticate first by visiting the authorization URL.'
+            'No refresh token available. Please complete authentication first by visiting the authorization URL.'
         );
     }
 
@@ -270,7 +316,7 @@ async function getValidAccessToken(): Promise<string> {
     if (!tokenData) {
         throw new McpError(
             ErrorCode.InvalidRequest,
-            'No token data available. Please authenticate first by visiting the authorization URL.'
+            'No token data available. Please complete authentication first by visiting the authorization URL.'
         );
     }
 

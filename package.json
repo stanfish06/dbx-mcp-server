@@ -1,11 +1,11 @@
 {
-  "name": "dropbox-mcp-server",
+  "name": "dbx-mcp-server",
   "version": "0.1.0",
-  "description": "A Model Context Protocol server",
+  "description": "A Model Context Protocol server for Dropbox integration",
   "private": true,
   "type": "module",
   "bin": {
-    "dropbox-mcp-server": "./build/index.js"
+    "dbx-mcp-server": "./build/index.js"
   },
   "files": [
     "build"
@@ -16,7 +16,9 @@
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "test": "node build/tests/dropbox-operations.test.js"
+    "test": "node build/tests/dbx-operations.test.js",
+    "setup": "node build/src/setup.js",
+    "start": "node build/src/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "0.6.0",
@@ -25,6 +27,7 @@
     "dotenv": "^16.4.7",
     "dropbox": "^10.34.0",
     "httpx": "^3.0.1",
+    "open": "^10.1.0",
     "winston": "^3.17.0"
   },
   "devDependencies": {

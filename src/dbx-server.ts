@@ -16,13 +16,13 @@ import { handleListPrompts, handleGetPrompt } from './prompt-handler.js';
 import { handleListResources, handleReadResource } from './resource-handler.js';
 import { toolDefinitions } from './tool-definitions.js';
 import { config, log } from './config.js';
-import * as dropboxApi from './dropbox-api.js';
+import * as dbxApi from './dbx-api.js';
 
 // Define resource templates
 const resourceTemplates = [
   {
-    uriTemplate: 'dropbox://{path}',
-    name: 'Dropbox Item',
+    uriTemplate: 'dbx://{path}',
+    name: 'Dbx Item',
     description: 'Access any file or folder in Dropbox by path',
     parameters: {
       path: {
@@ -33,8 +33,8 @@ const resourceTemplates = [
     }
   },
   {
-    uriTemplate: 'dropbox:///shared/{share_id}',
-    name: 'Shared Dropbox Item',
+    uriTemplate: 'dbx:///shared/{share_id}',
+    name: 'Shared Dbx Item',
     description: 'Access a shared Dropbox item by its share ID',
     parameters: {
       share_id: {
@@ -61,19 +61,19 @@ interface SearchOptions {
   order?: 'asc' | 'desc';
 }
 
-class DropboxServer {
+class DbxServer {
   private server: Server;
 
   constructor() {
     this.server = new Server(
       {
-        name: 'dropbox-mcp-server',
+        name: 'dbx-mcp-server',
         version: '0.1.0',
       },
       {
         capabilities: {
           resources: {
-            types: ["dropbox-file", "dropbox-folder"],
+            types: ["dbx-file", "dbx-folder"],
           },
           tools: {
             tools: toolDefinitions
@@ -135,16 +135,16 @@ class DropboxServer {
       const result = await (async () => {
         switch (request.params.name) {
           case 'list_files':
-            return await dropboxApi.listFiles(String(request.params.arguments?.path || ''));
+            return await dbxApi.listFiles(String(request.params.arguments?.path || ''));
           case 'upload_file':
-            return await dropboxApi.uploadFile(
+            return await dbxApi.uploadFile(
               String(request.params.arguments?.path),
               String(request.params.arguments?.content)
             );
           case 'download_file':
-            return await dropboxApi.downloadFile(String(request.params.arguments?.path));
+            return await dbxApi.downloadFile(String(request.params.arguments?.path));
           case 'safe_delete_item':
-            return await dropboxApi.safeDeleteItem({
+            return await dbxApi.safeDeleteItem({
               path: String(request.params.arguments?.path),
               userId: String(request.params.arguments?.userId),
               skipConfirmation: Boolean(request.params.arguments?.skipConfirmation),
@@ -155,26 +155,26 @@ class DropboxServer {
           case 'delete_item':
             // Legacy delete operation - logs a warning and uses safe delete with default settings
             log.warn('Legacy delete operation used', { path: request.params.arguments?.path });
-            return await dropboxApi.safeDeleteItem({
+            return await dbxApi.safeDeleteItem({
               path: String(request.params.arguments?.path),
               userId: 'legacy_user',
               skipConfirmation: true,
               permanent: true
             });
           case 'create_folder':
-            return await dropboxApi.createFolder(String(request.params.arguments?.path));
+            return await dbxApi.createFolder(String(request.params.arguments?.path));
           case 'copy_item':
-            return await dropboxApi.copyItem(
+            return await dbxApi.copyItem(
               String(request.params.arguments?.from_path),
               String(request.params.arguments?.to_path)
             );
           case 'move_item':
-            return await dropboxApi.moveItem(
+            return await dbxApi.moveItem(
               String(request.params.arguments?.from_path),
               String(request.params.arguments?.to_path)
             );
           case 'get_file_metadata':
-            return await dropboxApi.getFileMetadata(String(request.params.arguments?.path));
+            return await dbxApi.getFileMetadata(String(request.params.arguments?.path));
           case 'search_file_db': {
             const searchOptions: SearchOptions = {
               query: String(request.params.arguments?.query),
@@ -187,12 +187,14 @@ class DropboxServer {
               sortBy: (request.params.arguments?.sort_by as SearchOptions['sortBy']) || 'relevance',
               order: (request.params.arguments?.order as SearchOptions['order']) || 'desc'
             };
-            return await dropboxApi.searchFiles(searchOptions);
+            return await dbxApi.searchFiles(searchOptions);
           }
           case 'get_sharing_link':
-            return await dropboxApi.getSharingLink(String(request.params.arguments?.path));
+            return await dbxApi.getSharingLink(String(request.params.arguments?.path));
           case 'get_account_info':
-            return await dropboxApi.getAccountInfo();
+            return await dbxApi.getAccountInfo();
+          case 'get_file_content':
+            return await dbxApi.getFileContent(String(request.params.arguments?.path));
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -221,7 +223,7 @@ class DropboxServer {
       const transport = new StdioServerTransport();
       log.info('Connecting to transport...');
       await this.server.connect(transport);
-      log.info('Dropbox MCP server running on stdio');
+      log.info('Dbx MCP server running on stdio');
     } catch (error) {
       log.error('Error connecting server:', { 
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -232,4 +234,4 @@ class DropboxServer {
   }
 }
 
-export default DropboxServer;
+export default DbxServer;

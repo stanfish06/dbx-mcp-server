@@ -1,15 +1,15 @@
 import { Prompt, PromptMessage } from '@modelcontextprotocol/sdk/types.js';
 
-// Example prompt for getting help with Dropbox operations
+// Example prompt for getting help with file operations
 const helpPrompt: Prompt = {
-  name: 'dropbox_help',
-  description: 'Get help with Dropbox operations and commands',
+  name: 'dbx_help',
+  description: 'Get help with file operations and commands (integrates with Dropbox)',
   messages: [
     {
       role: 'user',
       content: {
         type: 'text',
-        text: 'How can I help you with Dropbox today?'
+        text: 'How can I help you with your file operations today?'
       }
     }
   ]
@@ -18,7 +18,7 @@ const helpPrompt: Prompt = {
 // Prompt for reviewing file operations before execution
 const reviewOperationPrompt: Prompt = {
   name: 'review_operation',
-  description: 'Review a Dropbox operation before executing it',
+  description: 'Review a file operation before executing it (integrates with Dropbox)',
   arguments: [
     {
       name: 'operation',
@@ -36,7 +36,7 @@ const reviewOperationPrompt: Prompt = {
       role: 'assistant',
       content: {
         type: 'text',
-        text: 'I will help you review the {operation} operation on path "{path}". This helps ensure safe execution of Dropbox operations.\n\nOperation details:\n- Type: {operation}\n- Path: {path}\n\nWould you like me to explain what this operation will do?'
+        text: 'I will help you review the {operation} operation on path "{path}". This helps ensure safe execution of file operations.\n\nOperation details:\n- Type: {operation}\n- Path: {path}\n\nWould you like me to explain what this operation will do?'
       }
     }
   ]

@@ -1,7 +1,7 @@
 const toolDefinitions = [
     {
       name: 'list_files',
-      description: 'List files in a Dropbox folder',
+      description: 'List files in a folder (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -15,7 +15,7 @@ const toolDefinitions = [
     },
     {
       name: 'upload_file',
-      description: 'Upload a file to Dropbox',
+      description: 'Upload a file (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -33,7 +33,7 @@ const toolDefinitions = [
     },
     {
       name: 'download_file',
-      description: 'Download a file from Dropbox to local disk and return the file path. Files are saved to the "downloads" directory.',
+      description: 'Download a file to local disk and return the file path. Files are saved to the "downloads" directory. (Integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -97,7 +97,7 @@ const toolDefinitions = [
     },
     {
       name: 'create_folder',
-      description: 'Create a new folder in Dropbox',
+      description: 'Create a new folder (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -161,7 +161,7 @@ const toolDefinitions = [
     },
     {
       name: 'search_file_db',
-      description: 'Advanced search for files and folders in Dropbox with filtering capabilities',
+      description: 'Advanced search for files and folders with filtering capabilities (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -244,7 +244,7 @@ const toolDefinitions = [
     },
     {
       name: 'get_account_info',
-      description: 'Get information about the connected Dropbox account',
+      description: 'Get information about the connected account (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -252,7 +252,7 @@ const toolDefinitions = [
     },
     {
       name: 'get_file_content',
-      description: 'Get the content of a file directly from Dropbox',
+      description: 'Get the content of a file (integrates with Dropbox)',
       inputSchema: {
         type: 'object',
         properties: {
@@ -266,4 +266,6 @@ const toolDefinitions = [
     },
   ];
 
+// Note: This project is not affiliated with, endorsed by, or sponsored by Dropbox.
+// It is an independent integration that works with Dropbox's public API.
 export { toolDefinitions };
