@@ -16,7 +16,10 @@
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
-    "test": "node build/tests/dbx-operations.test.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:integration": "node build/tests/dbx-operations.test.js",
     "setup": "node build/src/setup.js",
     "start": "node build/src/index.js"
   },
@@ -31,8 +34,17 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.26.9",
+    "@babel/preset-env": "^7.26.9",
+    "@babel/preset-typescript": "^7.26.0",
+    "@jest/globals": "^29.7.0",
     "@types/crypto-js": "^4.2.2",
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.11.24",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-ts-webcompat-resolver": "^1.0.0",
+    "ts-jest": "^29.2.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
