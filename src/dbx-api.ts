@@ -65,10 +65,20 @@ async function listFiles(path: string): Promise<McpToolResponse> {
             include_non_downloadable_files: true
         });
 
+        // Convert entries to a simpler format for listing
+        const files = response.result.entries.map(entry => ({
+            '.tag': entry['.tag'],
+            name: entry.name,
+            path_display: entry.path_display,
+            size: entry['.tag'] === 'file' ? entry.size : 0,
+            server_modified: entry['.tag'] === 'file' ? entry.server_modified : null,
+            client_modified: entry['.tag'] === 'file' ? entry.client_modified : null
+        }));
+
         return {
             content: [{
                 type: 'text',
-                text: JSON.stringify(response.result.entries, null, 2),
+                text: JSON.stringify(files, null, 2)
             }],
         };
     } catch (error: any) {
@@ -102,18 +112,53 @@ async function downloadFile(path: string): Promise<McpToolResponse> {
     try {
         const client = await getDropboxClient();
         
-        // Get metadata first to verify it's a file
+        // Get metadata first to check if it's a file or folder
         const metadata = await client.filesGetMetadata({
             path: formatDropboxPath(path)
         });
         
-        if (metadata.result['.tag'] !== 'file') {
-            throw new McpError(
-                ErrorCode.InvalidParams,
-                'Cannot download a folder'
-            );
+        if (metadata.result['.tag'] === 'folder') {
+            // For folders, get contents and format as ResourceContent
+            const folderContents = await client.filesListFolder({
+                path: formatDropboxPath(path),
+                recursive: false,
+                include_media_info: true,
+                include_deleted: false,
+                include_has_explicit_shared_members: false,
+                include_mounted_folders: true,
+                include_non_downloadable_files: true
+            });
+
+            // For folders, return a list of ResourceReference objects
+            const references = folderContents.result.entries.map(entry => ({
+                type: entry['.tag'] === 'folder' ? 'collection' : 'inline',
+                uri: `dbx://${entry.path_display}`,
+                content: {
+                    uri: `dbx://${entry.path_display}`,
+                    mimeType: entry['.tag'] === 'folder' ? 
+                        'application/x-directory' : 
+                        getMimeType(entry.name),
+                    content: '',  // Content is loaded on demand when accessing individual items
+                    encoding: 'utf8',
+                    metadata: {
+                        size: entry['.tag'] === 'file' && entry.size ? entry.size : 0,
+                        path: entry.path_display || path,
+                        modified: entry['.tag'] === 'file' && (entry.server_modified || entry.client_modified) ? 
+                            entry.server_modified || entry.client_modified : 
+                            new Date().toISOString()
+                    }
+                }
+            }));
+
+            return {
+                content: [{
+                    type: 'text',
+                    text: JSON.stringify(references, null, 2)
+                }],
+            };
         }
 
+        // For files, proceed with download and format as ResourceContent
         const response = await client.filesDownload({ 
             path: formatDropboxPath(path)
         });
@@ -123,16 +168,63 @@ async function downloadFile(path: string): Promise<McpToolResponse> {
             throw new Error('No file data received from Dropbox');
         }
 
+        // For files, return a single ResourceReference with base64 encoded content
+        const reference = {
+            type: 'inline',
+            uri: `dbx://${path}`,
+            content: {
+                uri: `dbx://${path}`,
+                mimeType: fileData.name ? getMimeType(fileData.name) : 'application/octet-stream',
+                content: fileData.fileBinary.toString('base64'),
+                encoding: 'base64',
+                metadata: {
+                    size: fileData.size || 0,
+                    path: fileData.path_display || path,
+                    modified: fileData.server_modified || fileData.client_modified || new Date().toISOString()
+                }
+            }
+        };
+
         return {
             content: [{
                 type: 'text',
-                text: fileData.fileBinary.toString('base64'),
-                encoding: 'base64'
+                text: JSON.stringify(reference, null, 2)
             }],
         };
     } catch (error: any) {
         handleDropboxError(error);
     }
+}
+
+// Helper function to determine MIME type
+function getMimeType(filename: string | undefined): string {
+    if (!filename) return 'application/octet-stream';
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (!ext) return 'application/octet-stream';
+    
+    const mimeTypes: { [key: string]: string } = {
+        'txt': 'text/plain',
+        'pdf': 'application/pdf',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'doc': 'application/msword',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls': 'application/vnd.ms-excel',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'json': 'application/json',
+        'md': 'text/markdown',
+        'html': 'text/html',
+        'css': 'text/css',
+        'js': 'application/javascript',
+        'ts': 'application/typescript',
+        'zip': 'application/zip',
+        'mp3': 'audio/mpeg',
+        'mp4': 'video/mp4',
+    };
+
+    return mimeTypes[ext] || 'application/octet-stream';
 }
 
 // Interface for delete operation tracking
@@ -476,7 +568,8 @@ interface SearchOptions {
 }
 
 function getFileCategory(metadata: any): string {
-    const extension = (metadata.name || '').split('.').pop()?.toLowerCase();
+    if (!metadata?.name) return 'other';
+    const extension = metadata.name.split('.').pop()?.toLowerCase();
     const mimeType = metadata.media_info?.metadata?.mime_type;
 
     if (mimeType?.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) {
@@ -530,7 +623,7 @@ async function searchFiles(options: SearchOptions): Promise<McpToolResponse> {
             }))
             .filter(match => {
                 // Apply filters
-                if (options.fileExtensions?.length) {
+                if (options.fileExtensions?.length && match.metadata?.name) {
                     const ext = match.metadata.name.split('.').pop()?.toLowerCase();
                     if (!ext || !options.fileExtensions.includes(ext)) return false;
                 }
@@ -538,7 +631,7 @@ async function searchFiles(options: SearchOptions): Promise<McpToolResponse> {
                     const category = getFileCategory(match.metadata);
                     if (!options.fileCategories.includes(category)) return false;
                 }
-                if (options.dateRange && match.metadata['.tag'] === 'file') {
+                if (options.dateRange && match.metadata?.['.tag'] === 'file' && match.metadata?.server_modified) {
                     const modTime = new Date(match.metadata.server_modified).getTime();
                     const startTime = options.dateRange.start ? new Date(options.dateRange.start).getTime() : 0;
                     const endTime = options.dateRange.end ? new Date(options.dateRange.end).getTime() : Infinity;
@@ -550,14 +643,14 @@ async function searchFiles(options: SearchOptions): Promise<McpToolResponse> {
         // Apply sorting
         if (options.sortBy && options.sortBy !== 'relevance') {
             matches.sort((a, b) => {
-                if (options.sortBy === 'last_modified_time') {
+                if (options.sortBy === 'last_modified_time' && a.metadata && b.metadata) {
                     const timeA = new Date(a.metadata.server_modified || 0).getTime();
                     const timeB = new Date(b.metadata.server_modified || 0).getTime();
                     return options.order === 'asc' ? timeA - timeB : timeB - timeA;
                 }
-                if (options.sortBy === 'file_size') {
-                    const sizeA = a.metadata['.tag'] === 'file' ? a.metadata.size : 0;
-                    const sizeB = b.metadata['.tag'] === 'file' ? b.metadata.size : 0;
+                if (options.sortBy === 'file_size' && a.metadata && b.metadata) {
+                    const sizeA = a.metadata['.tag'] === 'file' && a.metadata.size ? a.metadata.size : 0;
+                    const sizeB = b.metadata['.tag'] === 'file' && b.metadata.size ? b.metadata.size : 0;
                     return options.order === 'asc' ? sizeA - sizeB : sizeB - sizeA;
                 }
                 return 0;
@@ -702,10 +795,26 @@ async function getFileContent(path: string): Promise<McpToolResponse> {
             throw new Error('No file data received from Dropbox');
         }
 
+        const reference = {
+            type: 'inline',
+            uri: `dbx://${path}`,
+            content: {
+                uri: `dbx://${path}`,
+                mimeType: metadata.result.name ? getMimeType(metadata.result.name) : 'application/octet-stream',
+                content: fileData.fileBinary.toString('base64'),
+                encoding: 'base64',
+                metadata: {
+                    size: metadata.result.size || 0,
+                    path: metadata.result.path_display || path,
+                    modified: metadata.result.server_modified || metadata.result.client_modified || new Date().toISOString()
+                }
+            }
+        };
+
         return {
             content: [{
                 type: 'text',
-                text: fileData.fileBinary.toString('utf-8')
+                text: JSON.stringify(reference, null, 2)
             }],
         };
     } catch (error: any) {
