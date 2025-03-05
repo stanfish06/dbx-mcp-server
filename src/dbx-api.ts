@@ -242,7 +242,7 @@ function isPathAllowed(path: string): boolean {
     const normalizedPath = formatDropboxPath(path);
     
     // First check if path is in blocked paths - this takes precedence
-    const isBlocked = config.safety.blockedPaths.some(blockedPath => {
+    const isBlocked = config.safety.blockedPaths.some((blockedPath: string) => {
         const normalizedBlockedPath = formatDropboxPath(blockedPath);
         // Exact match or subdirectory of blocked path
         return normalizedPath === normalizedBlockedPath || 
@@ -255,7 +255,7 @@ function isPathAllowed(path: string): boolean {
     }
 
     // Then check if path is in allowed paths
-    const isAllowed = config.safety.allowedPaths.some(allowedPath => {
+    const isAllowed = config.safety.allowedPaths.some((allowedPath: string) => {
         const normalizedAllowedPath = formatDropboxPath(allowedPath);
         // Exact match or subdirectory of allowed path
         return normalizedPath === normalizedAllowedPath || 
@@ -310,7 +310,7 @@ async function safeDeleteItem(options: {
         // Validate path
         if (!isPathAllowed(path)) {
             const normalizedPath = formatDropboxPath(path);
-            const isBlocked = config.safety.blockedPaths.some(blockedPath => {
+            const isBlocked = config.safety.blockedPaths.some((blockedPath: string) => {
                 const normalizedBlockedPath = formatDropboxPath(blockedPath);
                 return normalizedPath === normalizedBlockedPath || 
                        normalizedPath.startsWith(normalizedBlockedPath + '/');
