@@ -389,12 +389,12 @@ async function safeDeleteItem(options: {
 
         // Soft deletion - move to recycle bin
         const versionId = generateVersionId();
-        const recyclePath = `${config.safety.recycleBinPath}/${versionId}_${path.split('/').pop()}`;
+        const recyclePath = `${config.safety.recycleBinPath as string}/${versionId}_${path.split('/').pop()}`;
         
         // Create recycle bin if it doesn't exist
         try {
             await client.filesCreateFolderV2({
-                path: config.safety.recycleBinPath,
+                path: config.safety.recycleBinPath as string,
                 autorename: false
             });
         } catch (error) {

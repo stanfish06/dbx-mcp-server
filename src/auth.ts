@@ -29,9 +29,9 @@ interface TokenData {
 }
 
 // Use config values which handle encrypted secrets
-const validatedAppKey: string = config.dropbox.appKey;
-const validatedAppSecret: string = config.dropbox.appSecret;
-const validatedRedirectUri: string = config.dropbox.redirectUri;
+const validatedAppKey: string = config.dropbox.appKey as string;
+const validatedAppSecret: string = config.dropbox.appSecret as string;
+const validatedRedirectUri: string = config.dropbox.redirectUri as string;
 
 // Skip validation during setup
 const isSetup = process.argv[1]?.endsWith('setup.js');
