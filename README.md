@@ -148,6 +148,36 @@ npm test
 
 Tests verify all operations including authentication, file operations, and error handling.
 
+### Test Structure
+
+The test suite is organized into several modules:
+
+- **Dropbox Operations**: Tests for basic file operations (upload, download, list, etc.)
+- **Account Operations**: Tests for accessing account information
+- **Search and Delete**: Tests for search functionality and safe deletion with recycle bin support
+- **Resource System**: Tests for the MCP resource system integration
+
+### Handling Test Data
+
+The tests use dynamically generated file and folder names based on timestamps to avoid conflicts. Test data is automatically cleaned up after test execution.
+
+### Running Specific Tests
+
+To run a specific test file or test group:
+
+```bash
+npm test -- tests/dropbox/search-delete.test.ts  # Run specific test file
+npm test -- -t "should search for files"        # Run tests matching description
+```
+
+### Troubleshooting Tests
+
+If tests fail with timing or authentication issues:
+
+1. Check that the mock implementations in `tests/setup.ts` match your test expectations
+2. Ensure test helpers are correctly configured
+3. For Jest scope errors, avoid referencing imported variables in mock factory functions
+
 ## Development
 
 Built with:

@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest, beforeAll, afterAll } from '@jest/globals';
+import { setupTestLogger, restoreConsole } from './utils/test-logger.js';
+import { testResultsTracker } from './utils/test-results-tracker.js';
 import { ResourceHandler } from '../src/resource/resource-handler.js';
 import { ResourceResolver } from '../src/resource/resource-resolver.js';
 import { ResourcePromptHandler } from '../src/prompt-handlers/resource-prompt-handler.js';
@@ -13,15 +15,41 @@ jest.mock('../src/dbx-api.js', () => ({
 }));
 
 describe('Resource System', () => {
+  const FILE_NAME = 'resource-system.test.ts';
   let resourceHandler: ResourceHandler;
   let resourceResolver: ResourceResolver;
   let promptHandler: ResourcePromptHandler;
+
+  beforeAll(() => {
+    // Set up the custom logger to suppress stack traces
+    setupTestLogger();
+  });
+
+  afterAll(() => {
+    // Restore original console methods
+    restoreConsole();
+  });
 
   beforeEach(() => {
     resourceHandler = new ResourceHandler();
     resourceResolver = new ResourceResolver();
     promptHandler = new ResourcePromptHandler();
     jest.clearAllMocks();
+    
+    const testName = expect.getState().currentTestName;
+    if (testName) {
+      testResultsTracker.registerTest(testName, FILE_NAME);
+    }
+  });
+
+  afterEach(() => {
+    const testName = expect.getState().currentTestName;
+    if (testName) {
+      const isPassed = !expect.getState().currentTestName?.includes('failed');
+      if (isPassed) {
+        testResultsTracker.markTestPassed(testName, FILE_NAME);
+      }
+    }
   });
 
   describe('ResourceResolver', () => {
@@ -38,6 +66,11 @@ describe('Resource System', () => {
       const result = await resourceResolver.resolveResource('dbx://test.txt');
       expect(result.content).toBe('file content');
       expect(result.mimeType).toBe('text/plain');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        uri: 'dbx://test.txt',
+        mimeType: result.mimeType
+      });
     });
 
     it('should handle binary files with base64 encoding', async () => {
@@ -53,6 +86,12 @@ describe('Resource System', () => {
       const result = await resourceResolver.resolveResource('dbx://image.png', { encoding: 'base64' });
       expect(result.encoding).toBe('base64');
       expect(result.mimeType).toBe('image/png');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        uri: 'dbx://image.png',
+        encoding: result.encoding,
+        mimeType: result.mimeType
+      });
     });
 
     it('should resolve a collection of resources', async () => {
@@ -64,6 +103,11 @@ describe('Resource System', () => {
       require('../src/dbx-api.js').listFiles.mockResolvedValue(mockFiles);
       const results = await resourceResolver.resolveCollection('dbx://folder');
       expect(results).toHaveLength(2);
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        uri: 'dbx://folder',
+        resultCount: results.length
+      });
     });
 
     it('should handle recursive folder resolution', async () => {
@@ -82,6 +126,13 @@ describe('Resource System', () => {
 
       const results = await resourceResolver.resolveCollection('dbx://folder', { recursive: true });
       expect(results.some(r => r.uri.includes('subfolder'))).toBe(true);
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        uri: 'dbx://folder',
+        recursive: true,
+        resultCount: results.length,
+        hasSubfolderResults: results.some(r => r.uri.includes('subfolder'))
+      });
     });
   });
 
@@ -94,6 +145,12 @@ describe('Resource System', () => {
       require('../src/dbx-api.js').listFiles.mockResolvedValue(mockFiles);
       const results = await resourceHandler.listResources('');
       expect(results[0].type).toBe('inline');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        path: '',
+        resultCount: results.length,
+        resourceType: results[0].type
+      });
     });
 
     it('should handle binary resources', async () => {
@@ -108,6 +165,11 @@ describe('Resource System', () => {
 
       const result = await resourceHandler.readBinaryResource('dbx://image.png');
       expect(result.encoding).toBe('base64');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        uri: 'dbx://image.png',
+        encoding: result.encoding
+      });
     });
   });
 
@@ -128,6 +190,11 @@ describe('Resource System', () => {
       });
 
       expect(result.resources?.attachments?.[0].content).toBeDefined();
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        path: '/test.txt',
+        hasAttachments: (result.resources?.attachments?.length ?? 0) > 0
+      });
     });
 
     it('should handle file comparison prompts', async () => {
@@ -145,12 +212,22 @@ describe('Resource System', () => {
 
       const result = await promptHandler.processFileComparison('/file1.txt', '/file2.txt');
       expect(result.resources?.inline).toHaveLength(2);
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        file1: '/file1.txt',
+        file2: '/file2.txt',
+        inlineResourceCount: result.resources?.inline?.length
+      });
     });
 
     it('should validate required arguments', async () => {
       await expect(promptHandler.processPrompt(fileDetailPrompt, {}))
         .rejects
         .toThrow('Missing required argument: path');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        validationError: 'Missing required argument: path'
+      });
     });
 
     it('should handle folder review with file type filtering', async () => {
@@ -164,6 +241,12 @@ describe('Resource System', () => {
 
       const result = await promptHandler.processFolderReview('/folder', 'ts,js');
       expect(result.resources?.collections).toBeDefined();
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        folder: '/folder',
+        fileTypes: 'ts,js',
+        hasCollections: result.resources?.collections !== undefined
+      });
     });
   });
 
@@ -172,6 +255,11 @@ describe('Resource System', () => {
       await expect(resourceResolver.resolveResource('invalid://test.txt'))
         .rejects
         .toThrow('Invalid URI format');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        invalidUri: 'invalid://test.txt',
+        errorType: 'Invalid URI format'
+      });
     });
 
     it('should handle missing resources', async () => {
@@ -180,6 +268,11 @@ describe('Resource System', () => {
       await expect(resourceResolver.resolveResource('dbx://missing.txt'))
         .rejects
         .toThrow('Failed to get file content');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        missingUri: 'dbx://missing.txt',
+        errorType: 'Failed to get file content'
+      });
     });
 
     it('should handle API errors gracefully', async () => {
@@ -188,6 +281,11 @@ describe('Resource System', () => {
       await expect(resourceHandler.listResources(''))
         .rejects
         .toThrow('Failed to list resources');
+      
+      testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
+        path: '',
+        errorType: 'Failed to list resources'
+      });
     });
   });
 });

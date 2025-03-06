@@ -4,6 +4,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { decryptData, encryptData } from '../src/security-utils.js';
 import dotenv from 'dotenv';
+import { setupTestLogger, restoreConsole } from './utils/test-logger.js';
+import { testResultsTracker } from './utils/test-results-tracker.js';
 
 // Load environment variables
 dotenv.config();
@@ -86,20 +88,16 @@ async function callMcpTool(toolName: string, args: any = {}): Promise<any> {
   return response.result;
 }
 
-interface TestResult {
-  passed: boolean;
-  error: Error | null;
-  startTime: Date | null;
-  endTime: Date | null;
-  duration: number | null;
-  details: Record<string, any>;
-}
-
 describe('Dropbox MCP Server', () => {
-  const testResults: Record<string, TestResult> = {};
-  const startTime = new Date();
+  const FILE_NAME = 'dbx-operations.test.ts';
 
   beforeAll(() => {
+    // Set up the custom logger to suppress stack traces
+    setupTestLogger();
+    
+    // Reset the test results tracker
+    testResultsTracker.reset();
+    
     // Verify token store exists
     if (!fs.existsSync(TOKEN_STORE_PATH)) {
       throw new Error('Token store not found. Please complete the authentication setup first.');
@@ -114,46 +112,6 @@ describe('Dropbox MCP Server', () => {
   });
 
   afterAll(async () => {
-    // Generate test summary
-    const endTime = new Date();
-    const totalDuration = endTime.getTime() - startTime.getTime();
-    const totalTests = Object.keys(testResults).length;
-    const passedTests = Object.values(testResults).filter(r => r.passed).length;
-
-    console.log('\n=== Test Summary ===');
-    console.log(`Run ID: ${timestamp}`);
-    console.log(`Test Folder: ${TEST_FOLDER_NAME}`);
-    console.log('-------------------');
-
-    Object.entries(testResults).forEach(([name, result]) => {
-      const icon = result.passed ? '✅' : '❌';
-      const status = result.passed ? 'Success' : 'Failed';
-      const duration = result.duration ? `${result.duration}ms` : 'N/A';
-
-      console.log(`\n${icon} ${name}`);
-      console.log(`   Status: ${status}`);
-      console.log(`   Duration: ${duration}`);
-
-      if (result.error) {
-        console.log(`   Error: ${result.error.message}`);
-      }
-
-      if (Object.keys(result.details).length > 0) {
-        console.log('   Details:');
-        Object.entries(result.details).forEach(([key, value]) => {
-          console.log(`     ${key}: ${value}`);
-        });
-      }
-    });
-
-    console.log('\n=== Summary Statistics ===');
-    console.log(`Total Tests: ${totalTests}`);
-    console.log(`Passed: ${passedTests}`);
-    console.log(`Failed: ${totalTests - passedTests}`);
-    console.log(`Success Rate: ${((passedTests / totalTests) * 100).toFixed(1)}%`);
-    console.log(`Total Duration: ${totalDuration}ms`);
-    console.log('==================\n');
-
     // Clean up test folder
     try {
       await callMcpTool('delete_item', {
@@ -163,29 +121,28 @@ describe('Dropbox MCP Server', () => {
     } catch (error) {
       console.error('Failed to clean up test folder:', error);
     }
+    
+    // Print test summary
+    testResultsTracker.printSummary(timestamp, TEST_FOLDER_NAME);
+    
+    // Restore original console methods
+    restoreConsole();
   });
 
   beforeEach(() => {
     const testName = expect.getState().currentTestName;
     if (testName) {
-      testResults[testName] = {
-        passed: false,
-        error: null,
-        startTime: new Date(),
-        endTime: null,
-        duration: null,
-        details: {}
-      };
+      testResultsTracker.registerTest(testName, FILE_NAME);
     }
   });
 
   afterEach(() => {
     const testName = expect.getState().currentTestName;
-    if (testName && testResults[testName]) {
-      testResults[testName].endTime = new Date();
-      testResults[testName].duration = testResults[testName].endTime.getTime() - 
-        (testResults[testName].startTime?.getTime() || 0);
-      testResults[testName].passed = !expect.getState().currentTestName?.includes('failed');
+    if (testName) {
+      const isPassed = !expect.getState().currentTestName?.includes('failed');
+      if (isPassed) {
+        testResultsTracker.markTestPassed(testName, FILE_NAME);
+      }
     }
   });
 
@@ -193,21 +150,21 @@ describe('Dropbox MCP Server', () => {
     const response = await callMcpTool('get_account_info');
     const accountInfo = JSON.parse(response.content[0].text);
     expect(accountInfo.account_id).toBeDefined();
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       accountId: accountInfo.account_id,
       name: accountInfo.name?.display_name,
       email: accountInfo.email,
       accountType: accountInfo.account_type
-    };
+    });
   });
 
   it('should create a folder', async () => {
     const response = await callMcpTool('create_folder', { path: `/${TEST_FOLDER_NAME}` });
     expect(response).toBeDefined();
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       folderName: TEST_FOLDER_NAME,
       path: `/${TEST_FOLDER_NAME}`
-    };
+    });
   });
 
   it('should upload a file', async () => {
@@ -217,11 +174,11 @@ describe('Dropbox MCP Server', () => {
       content: encodedContent
     });
     expect(response).toBeDefined();
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       fileName: TEST_FILE_NAME,
       path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
       contentSize: TEST_FILE_CONTENT.length
-    };
+    });
   });
 
   it('should get file metadata', async () => {
@@ -230,12 +187,12 @@ describe('Dropbox MCP Server', () => {
     });
     const metadata = JSON.parse(response.content[0].text);
     expect(metadata.name).toBe(TEST_FILE_NAME);
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       name: metadata.name,
       path: metadata.path_display,
       size: metadata.size,
       modified: metadata.server_modified
-    };
+    });
   });
 
   it('should download a file', async () => {
@@ -245,11 +202,11 @@ describe('Dropbox MCP Server', () => {
     const reference = JSON.parse(response.content[0].text);
     const content = decodeBase64(reference.content.content);
     expect(content).toBe(TEST_FILE_CONTENT);
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
       contentSize: content.length,
       contentMatch: content === TEST_FILE_CONTENT
-    };
+    });
   });
 
   it('should list files', async () => {
@@ -257,11 +214,11 @@ describe('Dropbox MCP Server', () => {
     const files = JSON.parse(response.content[0].text);
     expect(files).toHaveLength(1);
     expect(files[0].name).toBe(TEST_FILE_NAME);
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       path: `/${TEST_FOLDER_NAME}`,
       fileCount: files.length,
       files: files.map((f: { name: string }) => f.name).join(', ')
-    };
+    });
   });
 
   it('should search for files', async () => {
@@ -281,11 +238,11 @@ describe('Dropbox MCP Server', () => {
         })
       ])
     );
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       query: TEST_FILE_NAME,
       totalResults: results.total_results,
       matchCount: results.matches?.length || 0
-    };
+    });
   });
 
   it('should handle safe delete with confirmation', async () => {
@@ -295,11 +252,11 @@ describe('Dropbox MCP Server', () => {
     });
     const result = JSON.parse(response.content[0].text);
     expect(result.status).toBe('confirmation_required');
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
       status: result.status,
       message: result.message
-    };
+    });
   });
 
   it('should perform safe delete with skip confirmation', async () => {
@@ -310,10 +267,10 @@ describe('Dropbox MCP Server', () => {
     });
     const result = JSON.parse(response.content[0].text);
     expect(result.status).toBe('success');
-    testResults[expect.getState().currentTestName!].details = {
+    testResultsTracker.addTestDetails(expect.getState().currentTestName!, FILE_NAME, {
       path: `/${TEST_FOLDER_NAME}/${TEST_FILE_NAME}`,
       status: result.status,
       operation: result.operation
-    };
+    });
   });
 });
