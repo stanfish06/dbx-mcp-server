@@ -27,7 +27,7 @@ if (!isSetup) {
     validateConfig();
 }
 // Create logs directory if it doesn't exist
-const logsDir = path.join(path.dirname(path.dirname(path.dirname(new URL(import.meta.url).pathname))), 'logs');
+const logsDir = path.join(process.cwd(), 'logs');
 try {
     fs.mkdirSync(logsDir, { recursive: true });
 }
