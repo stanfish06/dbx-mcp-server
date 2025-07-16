@@ -10,9 +10,8 @@ A Model Context Protocol (MCP) server that provides integration with Dropbox, al
 - [Installation](#installation)
 - [Authentication](#authentication)
 - [Available Tools](#available-tools)
-- [Configuration](#configuration)
+- [Required Dropbox Permissions](#required-dropbox-permissions)
 - [Usage Examples](#usage-examples)
-- [Testing](#testing)
 - [Development](#development)
 - [License](#license)
 
@@ -21,23 +20,24 @@ A Model Context Protocol (MCP) server that provides integration with Dropbox, al
 1. Clone the repository
 2. Run `npm install` to install dependencies
 3. Run `npm run build` to build the project
-4. Register a Dropbox app at [Dropbox App Console](https://www.dropbox.com/developers/apps):
-   - Choose "Scoped access" API
-   - Choose the access type your app needs
-   - Name your app and click "Create app"
-   - Under "Permissions", select the required permissions:
-     - `files.metadata.read`
-     - `files.content.read`
-     - `files.content.write`
-     - `sharing.write`
-     - `account_info.read`
-   - Add `http://localhost:3000/callback` as your redirect URI
-   - Note your App key and App secret
-5. Run the setup script:
-   ```bash
-   npm run setup
-   ```
-6. Configure your MCP client to use the server
+4. Run `npm run setup`
+5. Configure your MCP client to use the server
+
+## Prerequisites
+
+Register a Dropbox app at [Dropbox App Console](https://www.dropbox.com/developers/apps):
+
+- Choose "Scoped access" API
+- Choose the access type your app needs
+- Name your app and click "Create app"
+- Under "Permissions", select the desired permissions for the actions you will be using, for example:
+    - `files.metadata.read`
+    - `files.content.read`
+    - `files.content.write`
+    - `sharing.write`
+    - `account_info.read`
+- Add `http://localhost` as your redirect URI
+- Note your App key and App secret
 
 ## Installation
 
@@ -118,6 +118,33 @@ Optional:
 
 - `get_account_info`: Get account information
 
+## Required Dropbox Permissions
+
+Below is a mapping of server actions to the minimum Dropbox OAuth scopes (permissions) required:
+
+| Server Action         | Required Dropbox Scopes                        |
+|---------------------- |-----------------------------------------------|
+| list_files            | `files.metadata.read`                         |
+| upload_file           | `files.content.write`, `files.metadata.write` |
+| download_file         | `files.content.read`                          |
+| safe_delete_item      | `files.metadata.write`                        |
+| create_folder         | `files.metadata.write`                        |
+| copy_item             | `files.content.write`, `files.metadata.write` |
+| move_item             | `files.content.write`, `files.metadata.write` |
+| get_file_metadata     | `files.metadata.read`                         |
+| search_file_db        | `files.metadata.read`                         |
+| get_sharing_link      | `sharing.write`                               |
+| get_file_content      | `files.content.read`                          |
+| get_account_info      | `account_info.read`                           |
+
+**Additional Scopes (if needed):**
+
+- `sharing.read`: View sharing settings and collaborators
+- `file_requests.read` / `file_requests.write`: For file request features
+- `contacts.read` / `contacts.write`: For accessing Dropbox contacts
+
+For more details on Dropbox scopes, see the [Dropbox Permissions Documentation](https://www.dropbox.com/developers/reference/oauth-guide#scopes).
+
 ## Usage Examples
 
 ```typescript
@@ -137,46 +164,6 @@ await mcp.useTool("dbx-mcp-server", "search_file_db", {
   max_results: 10,
 });
 ```
-
-## Testing
-
-Run the test suite:
-
-```bash
-npm test
-```
-
-Tests verify all operations including authentication, file operations, and error handling.
-
-### Test Structure
-
-The test suite is organized into several modules:
-
-- **Dropbox Operations**: Tests for basic file operations (upload, download, list, etc.)
-- **Account Operations**: Tests for accessing account information
-- **Search and Delete**: Tests for search functionality and safe deletion with recycle bin support
-- **Resource System**: Tests for the MCP resource system integration
-
-### Handling Test Data
-
-The tests use dynamically generated file and folder names based on timestamps to avoid conflicts. Test data is automatically cleaned up after test execution.
-
-### Running Specific Tests
-
-To run a specific test file or test group:
-
-```bash
-npm test -- tests/dropbox/search-delete.test.ts  # Run specific test file
-npm test -- -t "should search for files"        # Run tests matching description
-```
-
-### Troubleshooting Tests
-
-If tests fail with timing or authentication issues:
-
-1. Check that the mock implementations in `tests/setup.ts` match your test expectations
-2. Ensure test helpers are correctly configured
-3. For Jest scope errors, avoid referencing imported variables in mock factory functions
 
 ## Development
 
