@@ -4,6 +4,10 @@ import path from 'path';
 import fs from 'fs';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { decryptData } from './security-utils.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 // Load environment variables
 dotenv.config();
 // Required environment variables
@@ -27,7 +31,7 @@ if (!isSetup) {
     validateConfig();
 }
 // Create logs directory if it doesn't exist
-const logsDir = path.join(process.cwd(), 'logs');
+const logsDir = path.join(__dirname, '..', 'logs');
 try {
     fs.mkdirSync(logsDir, { recursive: true });
 }
