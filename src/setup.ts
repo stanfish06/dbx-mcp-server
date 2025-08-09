@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import { generateAuthUrl, exchangeCodeForTokens } from './auth.js';
 import { encryptData } from './security-utils.js';
+import { startCallbackServer } from './handle-auth.js';
 import open from 'open';
 
 // Type definitions for MCP config
@@ -97,6 +98,7 @@ DBX_BLOCKED_PATHS=/.recycle_bin,/.system`;
   const { url: authUrl, codeVerifier } = generateAuthUrl();
 
   // Open auth URL in browser
+  startCallbackServer();
   console.log('\nOpening authorization URL in your browser...');
   await open(authUrl);
 
